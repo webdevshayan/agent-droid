@@ -14,7 +14,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: core/go.mod
-      - name: Build (workspace: core + tests)
+      - name: "Build (workspace: core + tests)"
         run: go build ./core/... ./tests/...
       - name: Vet
         run: go vet ./core/... ./tests/...
