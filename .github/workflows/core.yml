@@ -1,0 +1,61 @@
+name: core
+
+on:
+  push:
+    branches: [main]
+    paths: ["core/**", ".github/workflows/core.yml"]
+  pull_request:
+    paths: ["core/**", ".github/workflows/core.yml"]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+
+      - name: Static analysis (gofmt + go vet)
+        run: |
+          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+          go vet ./...
+
+      - name: Unit and integration tests (race detector)
+        run: go test -race -count=1 -timeout 10m ./...
+
+      - name: Benchmarks (smoke)
+        run: go test -bench=. -benchtime=1x -run '^$' ./internal/...
+
+      - name: Binary size gate (< 15 MB)
+        run: |
+          go build -trimpath -ldflags "-s -w" -o /tmp/agentdroid ./cmd/agentdroid
+          SIZE=$(stat -c%s /tmp/agentdroid)
+          echo "binary size: ${SIZE} bytes"
+          test "$SIZE" -lt 15728640
+
+      - name: Startup latency (< 500 ms)
+        run: |
+          START=$(date +%s%N)
+          /tmp/agentdroid version > /dev/null
+          END=$(date +%s%N)
+          MS=$(( (END - START) / 1000000 ))
+          echo "startup: ${MS} ms"
+          test "$MS" -lt 500
+
+      - name: Smoke run (fake runtime, no device)
+        run: |
+          APK=/tmp/demo.apk && printf 'PK\x03\x04 demo payload' > "$APK"
+          /tmp/agentdroid --runtime fake launch "$APK"
+          /tmp/agentdroid snapshot
+          /tmp/agentdroid type @e2 "shayan@example.com"
+          /tmp/agentdroid type @e3 "hunter2"
+          /tmp/agentdroid tap @e5
+          /tmp/agentdroid snapshot | grep "Signed in as shayan@example.com"
+          /tmp/agentdroid screenshot > /tmp/shot.png
+          test "$(od -An -tx1 -N4 /tmp/shot.png | tr -d ' \n')" = "89504e47"
+          /tmp/agentdroid close
