@@ -1,0 +1,7 @@
+# Build artifacts
+agentdroid
+dist/
+
+# Go test artifacts
+*.test
+*.out
