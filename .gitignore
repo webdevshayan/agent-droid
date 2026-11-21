@@ -1,5 +1,7 @@
-# Build artifacts
-agentdroid
+# Build artifacts (leading slash: only the repo-root binary, so the
+core/cmd/agentdroid/ package directory is never swallowed)
+/agentdroid
+/agentdroid.exe
 core/agentdroid
 dist/
 
