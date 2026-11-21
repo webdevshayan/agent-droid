@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go.mod
+      - name: Build (workspace: core + tests)
+        run: go build ./core/... ./tests/...
+      - name: Vet
+        run: go vet ./core/... ./tests/...
+      - name: Test with coverage (unit + fuzz seeds + memory-abuse + e2e)
+        run: go test ./tests -count=1 -coverpkg=github.com/webdevshayan/agent-droid/core/... -coverprofile=coverage.out
+      - name: Coverage gate (>= 90% of core)
+        run: |
+          total=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%",""); print $3}')
+          echo "total coverage: ${total}%"
+          if [ -z "$total" ]; then
+            echo "could not read the coverage total"; exit 1
+          fi
+          if awk -v t="$total" 'BEGIN { exit (t+0 >= 90.0) ? 0 : 1 }'; then
+            echo "gate passed"
+          else
+            echo "coverage ${total}% is below the 90% gate"; exit 1
+          fi
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go.mod
+      - name: Fuzz CLI parser
+        run: go test ./tests -run '^$' -fuzz FuzzParseArgs -fuzztime 30s
+      - name: Fuzz view-tree parser
+        run: go test ./tests -run '^$' -fuzz FuzzParseXML -fuzztime 30s
+      - name: Fuzz ref parser
+        run: go test ./tests -run '^$' -fuzz FuzzParseRef -fuzztime 30s
+
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go.mod
+      - name: Fake runtime end-to-end (no adb needed)
+        run: |
+          set -e
+          go build -o /tmp/agentdroid ./core/cmd/agentdroid
+          /tmp/agentdroid help > /dev/null
+          /tmp/agentdroid --version | grep -q agentdroid
+          /tmp/agentdroid --runtime fake launch demo.apk
+          /tmp/agentdroid --runtime fake snapshot | grep -q 'Sign in'
+          /tmp/agentdroid --runtime fake tap @e2
+          /tmp/agentdroid --runtime fake type 'demo@gmail.com'
+          /tmp/agentdroid --runtime fake tap @e3
+          /tmp/agentdroid --runtime fake snapshot | grep -q 'Welcome, demo@gmail.com'
+          /tmp/agentdroid --runtime fake screenshot > /tmp/screen.png
+          test -s /tmp/screen.png
+          /tmp/agentdroid --runtime fake close
+      - name: Graceful failures without adb
+        run: |
+          set -e
+          # No adb on GitHub runners: device commands must degrade cleanly.
+          if /tmp/agentdroid tap @e1 > /dev/null 2>&1; then
+            echo "expected failure without adb"; exit 1
+          fi
+          /tmp/agentdroid tap @e1 2>&1 | grep -q "adb not found"
+          /tmp/agentdroid tap @0 2>&1 | grep -q "invalid element ref"
+          /tmp/agentdroid frobnicate 2>&1 | grep -q "unknown command"
