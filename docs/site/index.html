@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentDroid — the AI mobile testing CLI</title>
+<meta name="description" content="AgentDroid turns any Android screen into text refs @e1..@eN so AI agents can test mobile apps deterministically: snapshot, tap @e3, type, verify. Zero dependencies, fuzz-hardened.">
+<script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+<style>
+  :root {
+    --bg: #0a0f14;
+    --panel: #101821;
+    --line: #1d2a36;
+    --text: #d7e2ea;
+    --muted: #8ba0b3;
+    --accent: #4ade80;
+    --accent-dim: #22c55e22;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: clamp(0.95rem, 1.5vw, 1.05rem);
+    line-height: 1.65;
+  }
+  .wrap { max-width: 1020px; margin: 0 auto; padding-inline: clamp(16px, 4vw, 32px); }
+  code, pre, .mono { font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; }
+
+  /* nav */
+  .nav { border-bottom: 1px solid var(--line); position: sticky; top: 0; background: rgba(10,15,20,.92); backdrop-filter: blur(8px); z-index: 5; }
+  .nav .wrap { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-block: 12px; flex-wrap: wrap; }
+  .brand { font-weight: 700; font-size: clamp(1.05rem, 2.5vw, 1.3rem); letter-spacing: .5px; }
+  .brand .dot { color: var(--accent); }
+  .pill { font-size: .78rem; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; white-space: nowrap; }
+
+  /* hero */
+  .hero { padding-block: clamp(40px, 8vw, 84px) clamp(24px, 4vw, 40px); }
+  .kicker { color: var(--accent); text-transform: uppercase; letter-spacing: .18em; font-size: clamp(.72rem, 1.4vw, .8rem); margin: 0 0 14px; }
+  h1 { font-size: clamp(2.1rem, 7vw, 4rem); line-height: 1.08; margin: 0 0 18px; letter-spacing: -.02em; }
+  h1 .hl { color: var(--accent); }
+  .sub { color: var(--muted); max-width: 62ch; font-size: clamp(1rem, 2vw, 1.15rem); margin: 0 0 28px; }
+  .sub code { color: var(--text); }
+
+  .term { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .term-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: .8rem; }
+  .term-head i { width: 10px; height: 10px; border-radius: 50%; background: var(--line); display: inline-block; }
+  .term pre { margin: 0; padding: clamp(14px, 3vw, 22px); overflow-x: auto; font-size: clamp(.8rem, 1.6vw, .92rem); line-height: 1.55; }
+  .term .p { color: var(--accent); }
+  .term .c { color: var(--muted); }
+
+  .installrow { display: flex; gap: 10px; align-items: stretch; flex-wrap: wrap; margin-top: 22px; }
+  .installrow code {
+    flex: 1 1 320px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 14px; overflow-x: auto; white-space: nowrap; font-size: clamp(.8rem, 1.6vw, .92rem);
+  }
+  button.copy {
+    background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent);
+    border-radius: 10px; padding: 10px 18px; cursor: pointer; font-size: .85rem; min-width: 92px;
+  }
+  button.copy:hover { filter: brightness(1.2); }
+
+  /* tabs */
+  .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: clamp(28px, 5vw, 44px) 0 18px; }
+  .tabs button {
+    background: transparent; border: 1px solid var(--line); color: var(--muted);
+    border-radius: 999px; padding: 8px 18px; cursor: pointer; font-size: .9rem;
+  }
+  .tabs button:hover { color: var(--text); border-color: var(--muted); }
+  .tabs button.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+  #panel { min-height: 200px; }
+  #panel h2 { font-size: clamp(1.3rem, 3vw, 1.7rem); margin: 18px 0 10px; letter-spacing: -.01em; }
+  #panel h3 { font-size: clamp(1.05rem, 2.4vw, 1.2rem); margin: 22px 0 8px; color: var(--accent); }
+  #panel p, #panel li { color: var(--text); }
+  #panel .dim { color: var(--muted); }
+  #panel pre { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: clamp(12px, 2.5vw, 18px); overflow-x: auto; font-size: clamp(.8rem, 1.6vw, .9rem); }
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+  table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: .88rem; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+  td code { color: var(--accent); white-space: nowrap; }
+
+  /* features */
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; margin: clamp(32px, 6vw, 56px) 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+  .card h3 { margin: 0 0 8px; font-size: 1rem; color: var(--text); }
+  .card h3::before { content: "▸ "; color: var(--accent); }
+  .card p { margin: 0; color: var(--muted); font-size: .9rem; }
+
+  .strip {
+    display: flex; flex-wrap: wrap; gap: clamp(14px, 4vw, 40px);
+    border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+    padding: clamp(16px, 3vw, 26px); margin-bottom: clamp(32px, 6vw, 56px);
+  }
+  .strip div { flex: 1 1 140px; }
+  .strip b { display: block; color: var(--accent); font-size: clamp(1.2rem, 3vw, 1.6rem); font-family: ui-monospace, Menlo, monospace; }
+  .strip span { color: var(--muted); font-size: .82rem; }
+
+  footer { border-top: 1px solid var(--line); padding-block: 22px; color: var(--muted); font-size: .85rem; }
+  footer a { color: var(--accent); text-decoration: none; }
+  a { color: var(--accent); }
+  noscript p { border: 1px solid var(--accent); border-radius: 8px; padding: 10px 14px; color: var(--accent); }
+  @media (max-width: 640px) {
+    .term pre { font-size: .78rem; }
+    .installrow code { white-space: normal; overflow-wrap: anywhere; }
+  }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <div class="brand">agentdroid<span class="dot">_</span></div>
+    <div class="pill">v0.1.0 · zero dependencies</div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section class="hero">
+    <p class="kicker">AI mobile testing CLI</p>
+    <h1>Give your agent <span class="hl">hands</span> on Android.</h1>
+    <p class="sub">AgentDroid reads any screen as text refs — <code>@e1</code>, <code>@e2</code>, <code>@e3</code> — so an AI agent can <code>snapshot</code>, <code>tap @e3</code>, <code>type</code> and verify in plain text. No screenshots, no vision models, no pixel guessing — and with <code>--runtime fake</code> it runs against a simulated app with no device at all.</p>
+
+    <div class="term">
+      <div class="term-head"><i></i><i></i><i></i>&nbsp;the agent loop</div>
+      <pre><span class="p">$</span> agentdroid --runtime fake launch demo.apk
+launched demo.apk
+<span class="p">$</span> agentdroid --runtime fake snapshot
+@e3  android.widget.Button  text="Sign in"  clickable  bounds=[340,400][740,520]  center=(540,460)
+<span class="c"># the agent decides: tap the button</span>
+<span class="p">$</span> agentdroid --runtime fake tap @e3
+tapped @e3 at (540,460)
+<span class="p">$</span> agentdroid --runtime fake snapshot
+@e1  android.widget.TextView  text="Welcome, demo@gmail.com"  …</pre>
+    </div>
+
+    <div class="installrow">
+      <code id="install-cmd">go install github.com/webdevshayan/agent-droid/core/cmd/agentdroid@latest</code>
+      <button class="copy" data-copy="go install github.com/webdevshayan/agent-droid/core/cmd/agentdroid@latest">copy</button>
+    </div>
+  </section>
+
+  <noscript><p>Tabs need JavaScript — the full install, agent-loop and command docs are inline below and on GitHub.</p></noscript>
+
+  <nav class="tabs" aria-label="Documentation sections">
+    <button class="active" hx-get="frag-install.html" hx-target="#panel" hx-swap="innerHTML">Install</button>
+    <button hx-get="frag-loop.html" hx-target="#panel" hx-swap="innerHTML">Agent loop</button>
+    <button hx-get="frag-commands.html" hx-target="#panel" hx-swap="innerHTML">Commands</button>
+  </nav>
+
+  <section id="panel">
+    <h2>Install</h2>
+    <p>Requires <b>Go 1.22+</b> and <b>Android platform-tools</b> (<code>adb</code>) on <code>PATH</code>.</p>
+    <pre>go install github.com/webdevshayan/agent-droid/core/cmd/agentdroid@latest
+adb version        &amp;#8592; runtime dependency, installed separately
+agentdroid --version</pre>
+    <p class="dim">The binary is static and the module has zero third-party packages — nothing extra to audit. Or build from source: <code>git clone https://github.com/webdevshayan/agent-droid &amp;&amp; go build -o agentdroid ./core/cmd/agentdroid</code></p>
+  </section>
+
+  <section class="features">
+    <div class="card"><h3>Text over vision</h3><p>One stable line per element with its ref, text and bounds. Fits any model's context — even a cheap one.</p></div>
+    <div class="card"><h3>Agent-agnostic</h3><p>Works with Z.ai, Claude Code, Cursor, Codex CLI or your own harness. If it can run a shell command, it can drive a phone.</p></div>
+    <div class="card"><h3>Deterministic taps</h3><p>Refs resolve to parsed element centers. No coordinate guessing, no re-shooting screenshots after rotation.</p></div>
+    <div class="card"><h3>Hardened by default</h3><p>Fuzzed parsers, 20 MiB dump cap, 500 MB payloads rejected in ~90 ms, strict charset allowlist for typing.</p></div>
+    <div class="card"><h3>Script-friendly</h3><p>Exit codes 0/1/2, grep-able output, <code>snapshot --xml</code> raw mode. Agents branch on the exit code, not on vibes.</p></div>
+    <div class="card"><h3>Zero dependencies</h3><p>One static Go binary over adb. No runtimes, no containers, no third-party supply chain.</p></div>
+  </section>
+
+  <section class="strip">
+    <div><b>3M+</b><span>fuzz executions across the parsers</span></div>
+    <div><b>0</b><span>crashes found by fuzzing</span></div>
+    <div><b>94.8%</b><span>test coverage, all core packages</span></div>
+    <div><b>0</b><span>third-party dependencies</span></div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    AgentDroid — MIT licensed. Source and full docs at
+    <a href="https://github.com/webdevshayan/agent-droid">github.com/webdevshayan/agent-droid</a>.
+  </div>
+</footer>
+
+<script>
+  // Copy buttons (clipboard API with execCommand fallback).
+  function copyFallback(txt) {
+    var ta = document.createElement('textarea');
+    ta.value = txt; document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    ta.remove();
+  }
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('.copy');
+    if (!b) return;
+    var txt = b.getAttribute('data-copy') || '';
+    var src = document.getElementById(b.getAttribute('data-src') || '');
+    if (src) txt = src.innerText;
+    var done = function () {
+      b.textContent = 'copied ✓';
+      setTimeout(function () { b.textContent = 'copy'; }, 1500);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(done, function () { copyFallback(txt); done(); });
+    } else { copyFallback(txt); done(); }
+  });
+  // Tab active state + keep the panel in view after a swap.
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('.tabs button');
+    if (!b) return;
+    document.querySelectorAll('.tabs button').forEach(function (x) { x.classList.remove('active'); });
+    b.classList.add('active');
+  });
+  document.body.addEventListener('htmx:afterSwap', function () {
+    var p = document.getElementById('panel');
+    if (p) p.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+</script>
+</body>
+</html>

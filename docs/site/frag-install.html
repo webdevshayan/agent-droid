@@ -1,0 +1,30 @@
+<div>
+  <h2>Install</h2>
+  <p>Requires <b>Go 1.22+</b> and <b>Android platform-tools</b> (<code>adb</code>) on <code>PATH</code>. AgentDroid talks to devices through adb; adb itself is installed separately.</p>
+
+  <h3>Install the CLI</h3>
+  <div class="installrow">
+    <code>go install github.com/webdevshayan/agent-droid/core/cmd/agentdroid@latest</code>
+    <button class="copy" data-copy="go install github.com/webdevshayan/agent-droid/core/cmd/agentdroid@latest">copy</button>
+  </div>
+
+  <h3>Two runtimes</h3>
+  <p class="dim"><code>--runtime fake</code> needs nothing at all — it is a simulated app built into the binary, ideal for CI and for trying the agent loop. <code>--runtime adb</code> (default) drives real devices and emulators: download <i>Android platform-tools</i> from developer.android.com, put them on your <code>PATH</code>; Wi-Fi devices need <code>adb connect &lt;host&gt;</code> first. Other runtimes plug in via the driver protocol.</p>
+
+  <h3>Verify</h3>
+  <pre>$ agentdroid --version
+agentdroid 0.1.0
+
+$ agentdroid devices
+List of devices attached
+EMU1234	device product:sdk_gphone64_x86_64 model:sdk_gphone64_x86_64</pre>
+
+  <h3>Target a specific device</h3>
+  <p class="dim">With several devices attached, pick one globally: <code>agentdroid --serial EMU1234 snapshot</code> (short form <code>-s</code>).</p>
+
+  <h3>Build from source</h3>
+  <pre>git clone https://github.com/webdevshayan/agent-droid
+cd agent-droid
+go build -o agentdroid ./core/cmd/agentdroid
+go test ./tests</pre>
+</div>

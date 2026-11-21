@@ -1,0 +1,38 @@
+<div>
+  <h2>Command reference</h2>
+  <div class="tablewrap"><table>
+    <tr><th>Command</th><th>Effect</th></tr>
+    <tr><td><code>agentdroid devices</code></td><td>List attached devices — clear error when none (adb runtime).</td></tr>
+    <tr><td><code>agentdroid launch &lt;path.apk&gt;</code></td><td>adb: validate then install the APK · fake: start the simulated app.</td></tr>
+    <tr><td><code>agentdroid close</code></td><td>adb: send HOME (app stays installed) · fake: end the session.</td></tr>
+    <tr><td><code>agentdroid install &lt;path.apk&gt;</code></td><td>Alias of <code>launch</code> for the adb runtime.</td></tr>
+    <tr><td><code>agentdroid snapshot</code></td><td>Dump the screen; one line per tappable element with its ref.</td></tr>
+    <tr><td><code>agentdroid snapshot --xml</code></td><td>Print the raw uiautomator XML instead.</td></tr>
+    <tr><td><code>agentdroid tap @eN</code></td><td>Tap the element's center.</td></tr>
+    <tr><td><code>agentdroid type &lt;text&gt;</code></td><td>Type into the focused element (tap a field first).</td></tr>
+    <tr><td><code>agentdroid swipe @eA @eB</code></td><td>Swipe from element A to element B.</td></tr>
+    <tr><td><code>agentdroid swipe x1 y1 x2 y2</code></td><td>Swipe between raw coordinates.</td></tr>
+    <tr><td><code>agentdroid screenshot [--out &lt;path&gt;]</code></td><td>Capture a PNG — without <code>--out</code> it goes to stdout, so <code>agentdroid screenshot &gt; screen.png</code> works.</td></tr>
+    <tr><td><code>agentdroid clear @eN</code></td><td>Focus the element, move-end, bounded DEL sweep (40 chars).</td></tr>
+    <tr><td><code>agentdroid back</code> / <code>home</code></td><td>System navigation keys.</td></tr>
+    <tr><td><code>agentdroid --serial &lt;id&gt; &lt;cmd&gt;</code></td><td>Target a specific device (short form <code>-s</code>).</td></tr>
+    <tr><td><code>agentdroid --runtime fake|adb &lt;cmd&gt;</code></td><td>Pick the runtime: simulated app (no device) or adb.</td></tr>
+    <tr><td><code>agentdroid help</code> · <code>--version</code></td><td>Usage text · build version.</td></tr>
+  </table></div>
+
+  <h3>Exit codes</h3>
+  <div class="tablewrap"><table>
+    <tr><th>Code</th><th>Meaning</th><th>Agent action</th></tr>
+    <tr><td><code>0</code></td><td>Success</td><td>Continue the loop.</td></tr>
+    <tr><td><code>1</code></td><td>Runtime error (no device, adb missing, APK not found, ref out of range)</td><td>Retry sensible alternatives; read stderr.</td></tr>
+    <tr><td><code>2</code></td><td>Usage error (unknown command, malformed ref, oversized text)</td><td>Fix the command — do not retry blindly.</td></tr>
+  </table></div>
+
+  <h3>Snapshot line format</h3>
+  <pre>@eN  &lt;class&gt;  [text="…"]  [desc="…"]  [id=&lt;resource-id&gt;]  [pkg=&lt;package&gt;]
+    [clickable]  [scrollable]  [disabled]  bounds=[x1,y1][x2,y2]  center=(x,y)</pre>
+  <p class="dim">Empty fields are omitted; <code>text</code>/<code>desc</code> are Go-quoted so one element is always exactly one line.</p>
+
+  <h3>Typing rules</h3>
+  <p class="dim"><code>type</code> enforces an allowlist — <code>[a-zA-Z0-9-_.:,!?@#~^%*+=/]</code>, spaces become <code>%s</code> — and rejects shell metacharacters, control characters and non-ASCII with exit 1, instead of risking injection into the device shell. Hard cap: 4096 bytes, enforced before any copy or process spawn.</p>
+</div>

@@ -1,0 +1,28 @@
+<div>
+  <h2>The agent loop</h2>
+  <p>AgentDroid is designed around one loop that any shell-capable agent can run — Z.ai agent mode, Claude Code, Cursor, Codex CLI, Aider, or your own harness. Prefix every command with <code>--runtime fake</code> to run it against the simulated app with no device attached:</p>
+  <div class="tablewrap"><table>
+    <tr><th>Step</th><th>Command</th><th>What the agent does</th></tr>
+    <tr><td>1 · Discover</td><td><code>agentdroid devices</code></td><td>Confirm a device is attached; pick one with <code>--serial</code> if needed.</td></tr>
+    <tr><td>2 · Read</td><td><code>agentdroid snapshot</code></td><td>Every line is one element and one decision candidate. Use <code>--xml</code> for the full tree.</td></tr>
+    <tr><td>3 · Act</td><td><code>agentdroid tap @e3</code></td><td>One action per command. Branch on the exit code: 0 acted, 1 environment problem, 2 malformed command.</td></tr>
+    <tr><td>4 · Verify</td><td><code>agentdroid snapshot</code></td><td>Confirm the screen changed as intended before acting again.</td></tr>
+  </table></div>
+
+  <h3>Ref semantics — read before scripting</h3>
+  <p class="dim">Refs are <b>positional and stateless</b>: every ref command re-dumps the <i>current</i> screen and picks the Nth element. Each command is self-consistent, but a stale ref can point elsewhere after a screen change — so <b>snapshot immediately before acting</b>, and snapshot again after every action.</p>
+
+  <h3>A minimal agent prompt</h3>
+  <pre>You are testing an Android device with the agentdroid CLI.
+Rules:
+- Run `agentdroid snapshot` first and after EVERY action; refs are always
+  re-resolved against the current screen.
+- Act only by ref (`agentdroid tap @e3`) or by coordinates for swipes.
+- `agentdroid type "text"` goes to the focused element: tap the field first.
+- Exit code 0 = success, 1 = retryable environment error, 2 = your command was
+  malformed — fix the command, do not retry it blindly.
+- State what you did and what you verified after each step.</pre>
+
+  <h3>Piping tips</h3>
+  <p class="dim">Output is plain text with a stable line format, so agents can grep it — <code>agentdroid snapshot | grep -i 'sign in'</code> — or diff two snapshots to detect screen transitions programmatically.</p>
+</div>
