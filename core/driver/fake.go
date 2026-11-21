@@ -1,0 +1,307 @@
+// Package driver — fake runtime: an in-process simulated app that makes
+// the whole agent loop runnable with no device, no adb and no emulator.
+//
+// The fake app is a small three-screen state machine ("main", "welcome",
+// "about"). State persists across CLI invocations via a JSON file, because
+// each agentdroid command is its own process: launch writes the session,
+// every later command loads it, close removes it.
+package driver
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"image"
+	"image/color"
+	"image/png"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+const (
+	keyBack  = 4
+	keyHome  = 3
+	keyEnter = 66
+
+	screenMain    = 0
+	screenWelcome = 1
+	screenAbout   = 2
+)
+
+// fakeState is what persists between invocations.
+type fakeState struct {
+	Running  bool   `json:"running"`
+	App      string `json:"app"`
+	Screen   int    `json:"screen"`
+	Username string `json:"username"`
+	Focused  string `json:"focused"`
+}
+
+// Fake is the simulated-app driver.
+type Fake struct {
+	state fakeState
+}
+
+// fakeStatePath comes from AGENTDROID_FAKE_STATE (tests use a temp file)
+// and defaults to a session file in the OS temp dir.
+func fakeStatePath() string {
+	if p := os.Getenv("AGENTDROID_FAKE_STATE"); p != "" {
+		return p
+	}
+	return filepath.Join(os.TempDir(), "agentdroid-fake-state.json")
+}
+
+// OpenFake loads the persisted fake session (or starts blank).
+func OpenFake() *Fake {
+	var f Fake
+	if data, err := os.ReadFile(fakeStatePath()); err == nil {
+		_ = json.Unmarshal(data, &f.state)
+	}
+	return &f
+}
+
+// save persists the session; a stale/corrupt file is not fatal — the next
+// command simply reloads what it can.
+func (f *Fake) save() {
+	data, err := json.Marshal(f.state)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(fakeStatePath(), data, 0o600)
+}
+
+// Launch starts the simulated app. Any name ending in .apk is accepted —
+// nothing is really installed.
+func (f *Fake) Launch(apk string) error {
+	if !strings.EqualFold(filepath.Ext(apk), ".apk") {
+		return fmt.Errorf("launch: %q does not look like an APK (.apk)", apk)
+	}
+	f.state = fakeState{Running: true, App: apk, Screen: screenMain, Focused: ""}
+	f.save()
+	return nil
+}
+
+// Close terminates the simulated app and clears the session file.
+func (f *Fake) Close() error {
+	if err := f.running(); err != nil {
+		return err
+	}
+	f.state.Running = false
+	f.save()
+	_ = os.Remove(fakeStatePath())
+	return nil
+}
+
+// Devices is meaningless under the fake runtime.
+func (f *Fake) Devices() (string, error) {
+	return "", errors.New("devices applies to the adb runtime only")
+}
+
+// running reports a clean error when there is no session — never a panic.
+func (f *Fake) running() error {
+	if !f.state.Running {
+		return errors.New("no fake app running; run `agentdroid --runtime fake launch demo.apk` first")
+	}
+	return nil
+}
+
+// element is one fake UI node with fixed bounds for hit-testing.
+type element struct {
+	class     string
+	text      string
+	id        string
+	rect      [4]int
+	focusable bool
+}
+
+func (f *Fake) elements() []element {
+	switch f.state.Screen {
+	case screenWelcome:
+		return []element{
+			{class: "android.widget.TextView", text: "Welcome, " + f.state.Username, id: "demo:id/welcome", rect: [4]int{0, 0, 1080, 140}},
+			{class: "android.widget.Button", text: "Back", id: "demo:id/back", rect: [4]int{340, 400, 740, 520}},
+		}
+	case screenAbout:
+		return []element{
+			{class: "android.widget.TextView", text: "AgentDroid demo v0.1.0", id: "demo:id/about_text", rect: [4]int{0, 0, 1080, 140}},
+			{class: "android.widget.Button", text: "Back", id: "demo:id/back", rect: [4]int{340, 400, 740, 520}},
+		}
+	default: // main
+		return []element{
+			{class: "android.widget.TextView", text: "Demo App", id: "demo:id/title", rect: [4]int{0, 0, 1080, 140}},
+			{class: "android.widget.EditText", text: f.state.Username, id: "demo:id/username", rect: [4]int{54, 200, 1026, 320}, focusable: true},
+			{class: "android.widget.Button", text: "Sign in", id: "demo:id/signin", rect: [4]int{340, 400, 740, 520}},
+			{class: "android.widget.Button", text: "About", id: "demo:id/about", rect: [4]int{340, 560, 740, 680}},
+		}
+	}
+}
+
+// Dump renders the current screen as uiautomator-style XML — the same
+// format the snapshot parser consumes, so the agent loop is identical for
+// both drivers.
+func (f *Fake) Dump() ([]byte, error) {
+	if err := f.running(); err != nil {
+		return nil, err
+	}
+	var b strings.Builder
+	b.WriteString("<?xml version='1.0' encoding='UTF-8' ?>\n<hierarchy rotation=\"0\">\n")
+	for _, el := range f.elements() {
+		clickable := "false"
+		if el.class == "android.widget.Button" || el.focusable {
+			clickable = "true"
+		}
+		fmt.Fprintf(&b,
+			"  <node text=%q resource-id=%q class=%q content-desc=\"\" clickable=%q enabled=\"true\" scrollable=\"false\" bounds=\"[%d,%d][%d,%d]\"/>\n",
+			xmlEscape(el.text), el.id, el.class, clickable,
+			el.rect[0], el.rect[1], el.rect[2], el.rect[3])
+	}
+	b.WriteString("</hierarchy>")
+	return []byte(b.String()), nil
+}
+
+func xmlEscape(s string) string {
+	var b bytes.Buffer
+	for _, r := range s {
+		switch r {
+		case '&':
+			b.WriteString("&amp;")
+		case '<':
+			b.WriteString("&lt;")
+		case '>':
+			b.WriteString("&gt;")
+		case '"':
+			b.WriteString("&quot;")
+		case '\'':
+			b.WriteString("&apos;")
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// Tap hit-tests the point and applies the screen's action.
+func (f *Fake) Tap(x, y int) error {
+	if err := checkCoord(x); err != nil {
+		return err
+	}
+	if err := checkCoord(y); err != nil {
+		return err
+	}
+	if err := f.running(); err != nil {
+		return err
+	}
+	for _, el := range f.elements() {
+		if x < el.rect[0] || x > el.rect[2] || y < el.rect[1] || y > el.rect[3] {
+			continue
+		}
+		switch el.id {
+		case "demo:id/username":
+			f.state.Focused = "username"
+		case "demo:id/signin":
+			f.state.Screen = screenWelcome
+			f.state.Focused = ""
+		case "demo:id/about":
+			f.state.Screen = screenAbout
+			f.state.Focused = ""
+		case "demo:id/back":
+			f.state.Screen = screenMain
+			f.state.Focused = ""
+		}
+		f.save()
+		return nil
+	}
+	return nil // tap on empty screen area: a no-op, like a real tap
+}
+
+// Type appends text to the focused field.
+func (f *Fake) Type(text string) error {
+	if len(text) == 0 {
+		return errors.New("type: text is empty")
+	}
+	if len(text) > 4096 {
+		return fmt.Errorf("type: text is %d bytes, over the 4096-byte limit", len(text))
+	}
+	if err := f.running(); err != nil {
+		return err
+	}
+	if f.state.Focused != "username" {
+		return errors.New("type: no focused text field; tap the field first")
+	}
+	f.state.Username += text
+	f.save()
+	return nil
+}
+
+// Swipe is a no-op on the fake screens (documented in the protocol doc).
+func (f *Fake) Swipe(x1, y1, x2, y2, durationMs int) error {
+	for _, n := range []int{x1, y1, x2, y2} {
+		if err := checkCoord(n); err != nil {
+			return err
+		}
+	}
+	if err := f.running(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Key handles BACK, HOME and ENTER; other keycodes are accepted no-ops.
+func (f *Fake) Key(code int) error {
+	if err := f.running(); err != nil {
+		return err
+	}
+	switch code {
+	case keyBack, keyHome:
+		f.state.Screen = screenMain
+		f.state.Focused = ""
+	case keyEnter:
+		if f.state.Screen == screenMain && f.state.Focused == "username" {
+			f.state.Screen = screenWelcome
+			f.state.Focused = ""
+		}
+	}
+	f.save()
+	return nil
+}
+
+// Screenshot renders a small deterministic PNG (color-coded per screen).
+func (f *Fake) Screenshot() ([]byte, error) {
+	if err := f.running(); err != nil {
+		return nil, err
+	}
+	var base color.RGBA
+	switch f.state.Screen {
+	case screenWelcome:
+		base = color.RGBA{0x23, 0x86, 0x36, 0xff}
+	case screenAbout:
+		base = color.RGBA{0x82, 0x50, 0xdf, 0xff}
+	default:
+		base = color.RGBA{0x1f, 0x6f, 0xeb, 0xff}
+	}
+	img := image.NewRGBA(image.Rect(0, 0, 1080, 2400))
+	for y := 0; y < 2400; y++ {
+		for x := 0; x < 1080; x++ {
+			img.Set(x, y, base)
+		}
+	}
+	for y := 0; y < 140; y++ {
+		for x := 0; x < 1080; x++ {
+			img.Set(x, y, color.RGBA{0xf0, 0xf6, 0xfc, 0xff})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil, fmt.Errorf("screenshot: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+func checkCoord(n int) error {
+	if n < 0 || n > 100000 {
+		return fmt.Errorf("coordinate %d out of range 0..100000", n)
+	}
+	return nil
+}

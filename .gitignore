@@ -1,7 +1,11 @@
 # Build artifacts
 agentdroid
+core/agentdroid
 dist/
 
 # Go test artifacts
 *.test
 *.out
+coverage.out
+coverage.html
+*.prof
