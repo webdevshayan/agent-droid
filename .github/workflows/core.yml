@@ -3,37 +3,34 @@ name: core
 on:
   push:
     branches: [main]
-    paths: ["core/**", ".github/workflows/core.yml"]
+    paths: ["core/**", "tests/**", ".github/workflows/core.yml"]
   pull_request:
-    paths: ["core/**", ".github/workflows/core.yml"]
+    paths: ["core/**", "tests/**", ".github/workflows/core.yml"]
 
 jobs:
   verify:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: core
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "stable"
+          go-version-file: core/go.mod
 
       - name: Static analysis (gofmt + go vet)
         run: |
-          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
-          go vet ./...
+          test -z "$(gofmt -l core tests)" || { gofmt -l core tests; exit 1; }
+          go vet ./core/... ./tests/...
 
       - name: Unit and integration tests (race detector)
-        run: go test -race -count=1 -timeout 10m ./...
+        run: go test -race -count=1 -timeout 10m ./core/... ./tests/...
 
       - name: Benchmarks (smoke)
-        run: go test -bench=. -benchtime=1x -run '^$' ./internal/...
+        run: go test -bench=. -benchtime=1x -run '^$' ./core/internal/...
 
       - name: Binary size gate (< 15 MB)
         run: |
-          go build -trimpath -ldflags "-s -w" -o /tmp/agentdroid ./cmd/agentdroid
+          go build -trimpath -ldflags "-s -w" -o /tmp/agentdroid ./core/cmd/agentdroid
           SIZE=$(stat -c%s /tmp/agentdroid)
           echo "binary size: ${SIZE} bytes"
           test "$SIZE" -lt 15728640
@@ -47,15 +44,40 @@ jobs:
           echo "startup: ${MS} ms"
           test "$MS" -lt 500
 
-      - name: Smoke run (fake runtime, no device)
+      - name: Smoke run — in-process fake runtime (no device)
         run: |
+          set -e
           APK=/tmp/demo.apk && printf 'PK\x03\x04 demo payload' > "$APK"
           /tmp/agentdroid --runtime fake launch "$APK"
-          /tmp/agentdroid snapshot
-          /tmp/agentdroid type @e2 "shayan@example.com"
-          /tmp/agentdroid type @e3 "hunter2"
-          /tmp/agentdroid tap @e5
-          /tmp/agentdroid snapshot | grep "Signed in as shayan@example.com"
-          /tmp/agentdroid screenshot > /tmp/shot.png
+          /tmp/agentdroid --runtime fake snapshot | grep 'Sign in'
+          /tmp/agentdroid --runtime fake tap @e2
+          /tmp/agentdroid --runtime fake type 'demo@gmail.com'
+          /tmp/agentdroid --runtime fake tap @e3
+          /tmp/agentdroid --runtime fake snapshot | grep 'Welcome, demo@gmail.com'
+          /tmp/agentdroid --runtime fake screenshot > /tmp/shot.png
           test "$(od -An -tx1 -N4 /tmp/shot.png | tr -d ' \n')" = "89504e47"
-          /tmp/agentdroid close
+          /tmp/agentdroid --runtime fake close
+
+      - name: Smoke run — runtime session daemon (zero-storage socket)
+        run: |
+          set -e
+          APK=/tmp/demo.apk
+          /tmp/agentdroid launch "$APK" --runtime fake --session ci1
+          /tmp/agentdroid snapshot --session ci1 | grep 'demo:id/email'
+          /tmp/agentdroid tap @e3 --session ci1
+          /tmp/agentdroid type 'ci@example.com' --session ci1
+          /tmp/agentdroid tap @e4 --session ci1
+          /tmp/agentdroid type 'hunter2' --session ci1
+          /tmp/agentdroid tap @e6 --session ci1
+          /tmp/agentdroid snapshot --session ci1 | grep 'Signed in as ci@example.com'
+          /tmp/agentdroid screenshot --session ci1 > /tmp/shot2.png
+          test "$(od -An -tx1 -N4 /tmp/shot2.png | tr -d ' \n')" = "89504e47"
+          /tmp/agentdroid close --session ci1
+
+      - name: Smoke run — serve stdio bridge
+        run: |
+          set -e
+          printf '{"id":1,"cmd":"launch","apk":"/tmp/demo.apk"}\n{"id":2,"cmd":"snapshot"}\n{"id":3,"cmd":"close"}\n' \
+            | /tmp/agentdroid serve --backend fake --stdio > /tmp/stdio.ndjson
+          grep -q '"id":2' /tmp/stdio.ndjson
+          grep -q 'sign_in' /tmp/stdio.ndjson

@@ -55,7 +55,7 @@ func BenchmarkParseTree(b *testing.B) {
 	}
 }
 
-func BenchmarkFlattenAndRender(b *testing.B) {
+func BenchmarkRenderXML(b *testing.B) {
 	data := bigTreeJSON(2000)
 	root, err := uitree.Parse(data)
 	if err != nil {
@@ -64,9 +64,8 @@ func BenchmarkFlattenAndRender(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		els := uitree.Flatten(root)
-		out := uitree.RenderList(els)
-		if len(out) == 0 {
+		out, err := uitree.XML(root)
+		if err != nil || len(out) == 0 {
 			b.Fatal("empty render")
 		}
 	}

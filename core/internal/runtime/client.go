@@ -61,5 +61,11 @@ func (c *Client) Call(req protocol.Request, timeout time.Duration) (*protocol.Re
 	return &resp, nil
 }
 
+// NewClient wraps an existing connection — a live socket, or a net.Pipe in
+// tests and embedders — as a session client.
+func NewClient(conn net.Conn) *Client {
+	return &Client{conn: conn, br: protocol.NewReader(conn)}
+}
+
 // Close drops the connection without ending the session.
 func (c *Client) Close() error { return c.conn.Close() }

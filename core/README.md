@@ -113,6 +113,35 @@ which means:
 - Newlines are not supported by `input text`; split text across `type` +
   `keyevent 66` steps, or use `clear`/app-level controls.
 
+## Runtime sessions (ATL, WineDroid, fake — zero storage)
+
+Beyond the in-process runtimes above, `launch --session` runs a runtime as a
+**detached daemon**: the session lives in the daemon's memory and its abstract
+Unix socket (`@agentdroid-<session>`, kernel-only — nothing on disk). Every
+later command attaches to that socket and drives the session through the same
+`driver.Driver` contract as adb (`driver.RT`):
+
+```console
+$ agentdroid launch app.apk --runtime fake --session s1
+launched app.apk — session "s1" (adapter pid 1234)
+$ agentdroid snapshot --session s1        # same @eN refs as everywhere else
+$ agentdroid tap @e3 --session s1 && agentdroid type "hi@example.com" --session s1
+$ agentdroid screenshot --session s1 > screen.png
+$ agentdroid close --session s1
+```
+
+- `--runtime` selects the session runtime: `fake` (simulated login app),
+  `atl` (Android Translation Layer) or `winedroid` — both spawn their real
+  launcher as a plain Linux process, no emulator, no adb, no container.
+- Refs are resolved against the **live screen** at command time, so they
+  never go stale between invocations and no element map is ever stored.
+- `agentdroid serve --backend <rt> --session <name> [--stdio]` serves a
+  session directly (this is what `launch --session` spawns; `--stdio` speaks
+  the same protocol on stdin/stdout for embedding).
+- Adapter status matrix and the upstream hooks ATL/WineDroid still need:
+  [docs/ADAPTERS.md](docs/ADAPTERS.md); the session wire protocol:
+  [docs/SESSION_PROTOCOL.md](docs/SESSION_PROTOCOL.md).
+
 ## The agent loop (works with any shell-capable agent)
 
 Z.ai agent mode, Claude Code, Cursor, Codex CLI, Aider, or your own harness —
@@ -187,8 +216,9 @@ Layout:
 core/cli/        argv parser (pure, fuzzed)
 core/snapshot/   view-tree XML parser + ref resolution (fuzzed)
 core/device/     adb wrapper: timeouts, output caps, charset allowlist
-core/driver/     the Driver contract + adb and fake implementations
-core/app/        dispatch, exit codes, help text
+core/driver/     the Driver contract + adb, fake and session (RT) drivers
+core/app/        dispatch, exit codes, session launcher, help text
+core/internal/   session engine: protocol (NDJSON), runtime (serve/backends), uitree
 core/cmd/agentdroid/  entry point
 tests/           everything: unit, fuzz, memory-abuse, e2e, hardening
 docs/site/       landing page (static HTMX, no build step)
@@ -199,7 +229,8 @@ per parser, and a no-device smoke of the fake runtime on every push.
 
 ## Roadmap
 
-- ATL / WineDroid drivers behind the same contract
+- ATL / WineDroid upstream hooks: view-tree dump + framebuffer capture
+  (process lifecycle is real today; see docs/ADAPTERS.md)
 - clipboard/IME input path for Unicode text on real devices
 - `snapshot --json` machine-readable output mode
 - wait-for-element (`wait @e5 --timeout 10s`)

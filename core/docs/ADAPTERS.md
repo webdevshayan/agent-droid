@@ -2,7 +2,7 @@
 
 An adapter implements the `Backend` interface (Go, `internal/runtime/backend.go`)
 and serves it to the CLI over the session socket — see
-[DRIVER_PROTOCOL.md](DRIVER_PROTOCOL.md) for the wire format.
+[SESSION_PROTOCOL.md](SESSION_PROTOCOL.md) for the wire format.
 
 ```go
 type Backend interface {
@@ -67,11 +67,23 @@ protocol, refs, rendering and tests stay untouched.
 `--runtime-bin` on the CLI overrides the adapter binary itself (used by the
 test suite to re-exec its own binary).
 
+## How this plugs into the driver contract
+
+The CLI drives sessions through `driver.RT` (`core/driver/rt.go`), a
+`driver.Driver` implementation over the session client — the same contract
+as the adb and fake drivers. `agentdroid launch --session` spawns the
+daemon and hands it the APK; `snapshot/tap/type/screenshot/close
+--session` attach through `RT`, whose `Dump` renders the view tree as
+uiautomator-style XML so `core/snapshot` stays the single ref pipeline.
+`Swipe`/`Key`/`Devices` degrade to explicit errors over sessions — the
+parser rejects them at exit code 2.
+
 ## Writing your own adapter
 
 1. Implement `Backend` (or speak the NDJSON protocol directly and run `agentdroid
    serve --stdio` as a bridge).
 2. Register it in `NewBackend` (`internal/runtime/backend.go`) or run it with
    `--runtime-bin`.
-3. Add a session test against the `fake` flow in `internal/integration` —
-   launch → snapshot → tap/type → screenshot → close is the full contract.
+3. Add a session test against the `fake` flow in `tests/` —
+   launch → snapshot → tap/type → screenshot → close is the full contract
+   (see `tests/integration_test.go` and `core/driver/rt_test.go`).
