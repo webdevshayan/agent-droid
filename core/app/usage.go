@@ -20,6 +20,11 @@ Usage:
   agentdroid back | home                  system navigation keys
   agentdroid --runtime fake <command>     run against the simulated app
   agentdroid [--serial <id>] <command>    target a specific device (adb)
+  agentdroid launch <path.apk> --session <name> [--runtime fake|atl|winedroid]
+                                          start a zero-storage runtime session
+  agentdroid <command> --session <name>   snapshot/tap/type/screenshot/close a live session
+  agentdroid serve --backend fake|atl|winedroid --session <name> [--stdio]
+                                          serve a session (used by launch; scriptable)
   agentdroid help | --version             this text / build version
 
 Try it with no device at all:

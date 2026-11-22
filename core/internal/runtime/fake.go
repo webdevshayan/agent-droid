@@ -101,6 +101,21 @@ func (f *FakeBackend) Type(x, y int, text string) *protocol.Response {
 	if !f.started {
 		return errResp("no app launched in this session")
 	}
+	// Coordinate-less form: text goes to the field the daemon already has
+	// focused. This is how the CLI's `type <text>` (no coordinates) reaches
+	// a field focused by an earlier `tap` command — the daemon keeps focus
+	// across CLI invocations, exactly like a real device would.
+	if x < 0 || y < 0 {
+		switch f.focused {
+		case "email":
+			f.email += text
+		case "password":
+			f.password += text
+		default:
+			return errResp("type: no focused field — tap an editable field first")
+		}
+		return &protocol.Response{OK: true}
+	}
 	// Typing taps the target first to focus it, mirroring how a real
 	// keyboard works: the coordinates decide which field receives text.
 	f.tapLocked(x, y)

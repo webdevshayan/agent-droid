@@ -19,7 +19,7 @@ jobs:
       - name: Vet
         run: go vet ./core/... ./tests/...
       - name: Test with coverage (unit + fuzz seeds + memory-abuse + e2e)
-        run: go test ./tests -count=1 -coverpkg=github.com/webdevshayan/agent-droid/core/... -coverprofile=coverage.out
+        run: go test ./core/... ./tests/... -count=1 -coverpkg=github.com/webdevshayan/agent-droid/core/... -coverprofile=coverage.out
       - name: Coverage gate (>= 90% of core)
         run: |
           total=$(go tool cover -func=coverage.out | awk '/^total:/ {gsub("%",""); print $3}')
@@ -51,6 +51,8 @@ jobs:
         run: go test ./tests -run '^$' -fuzz FuzzParseXML -fuzztime 30s
       - name: Fuzz ref parser
         run: go test ./tests -run '^$' -fuzz FuzzParseRef -fuzztime 30s
+      - name: Fuzz session view-tree parser
+        run: go test ./core/internal/uitree -run '^$' -fuzz FuzzParseTree -fuzztime 30s
 
   smoke:
     runs-on: ubuntu-latest

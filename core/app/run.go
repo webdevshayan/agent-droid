@@ -7,12 +7,17 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
+	"syscall"
+	"time"
 
 	"github.com/webdevshayan/agent-droid/core/cli"
 	"github.com/webdevshayan/agent-droid/core/device"
 	"github.com/webdevshayan/agent-droid/core/driver"
+	"github.com/webdevshayan/agent-droid/core/internal/protocol"
+	"github.com/webdevshayan/agent-droid/core/internal/runtime"
 	"github.com/webdevshayan/agent-droid/core/snapshot"
 )
 
@@ -38,6 +43,28 @@ func Run(argv []string, stdout, stderr io.Writer, drv driver.Driver) int {
 	case cli.VerbVersion:
 		fmt.Fprintf(stdout, "agentdroid %s\n", Version)
 		return 0
+	case cli.VerbServe:
+		if err := runtime.ServeMain(runtime.ServeOptions{
+			Backend:    cmd.Backend,
+			Session:    cmd.Session,
+			APK:        cmd.Path,
+			RuntimeBin: cmd.RuntimeBin,
+			Stdio:      cmd.Stdio,
+			Stdout:     stdout,
+			Stderr:     stderr,
+		}); err != nil {
+			fmt.Fprintf(stderr, "agentdroid: serve: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+
+	// Session mode: launch spawns the zero-storage daemon; every other
+	// command attaches to the live session and drives it through the same
+	// Driver contract as adb (driver.RT over the session client). An
+	// injected drv (tests) only applies to the in-process path.
+	if cmd.Session != "" {
+		return runSession(cmd, stdout, stderr)
 	}
 
 	if drv == nil {
@@ -200,6 +227,129 @@ func dispatch(d driver.Driver, cmd cli.Command, stdout io.Writer) error {
 		fmt.Fprintln(stdout, "home")
 	}
 	return nil
+}
+
+// sessionDialTimeout bounds attaching to a live session socket.
+const sessionDialTimeout = 15 * time.Second
+
+// launchDeadline bounds spawning the daemon and the launch handshake.
+const launchDeadline = 30 * time.Second
+
+// runSession executes one command against a runtime daemon session: launch
+// spawns `agentdroid serve` detached (setsid) and performs the launch
+// handshake; everything else attaches through driver.RT, so dispatch, refs
+// and exit codes are identical to the in-process runtimes. No session
+// state ever touches disk — the daemon keeps it in memory.
+func runSession(cmd cli.Command, stdout, stderr io.Writer) int {
+	if cmd.Verb == cli.VerbLaunch || cmd.Verb == cli.VerbInstall {
+		if err := sessionLaunch(cmd, stdout); err != nil {
+			fmt.Fprintf(stderr, "agentdroid: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	client, err := runtime.DialSession(cmd.Session, sessionDialTimeout)
+	if err != nil {
+		fmt.Fprintf(stderr, "agentdroid: %v\n", err)
+		return 1
+	}
+	if err := dispatch(driver.NewRT(client), cmd, stdout); err != nil {
+		fmt.Fprintf(stderr, "agentdroid: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// sessionLaunch spawns this binary as a detached serve daemon for the
+// session's backend, waits for its abstract socket, and hands it the APK.
+// The daemon survives this short-lived process; the session lives entirely
+// in the daemon's memory and its kernel-only socket.
+func sessionLaunch(cmd cli.Command, stdout io.Writer) error {
+	if _, err := os.Stat(cmd.Path); err != nil {
+		return fmt.Errorf("launch: apk not accessible: %w", err)
+	}
+	// A live session is never silently replaced; make the operator close it.
+	if probe, err := runtime.DialSession(cmd.Session, 500*time.Millisecond); err == nil {
+		_ = probe.Close()
+		return fmt.Errorf("session %q is already live; run agentdroid close --session %s first", cmd.Session, cmd.Session)
+	}
+
+	bin := cmd.RuntimeBin
+	if bin == "" {
+		self, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("launch: resolve adapter binary: %w", err)
+		}
+		bin = self
+	}
+	daemon := exec.Command(bin, "serve", "--backend", cmd.Runtime, "--session", cmd.Session)
+	// Detached daemons get /dev/null stdio: an inherited pipe would keep
+	// whoever ran `launch` waiting for EOF until the daemon exits. Bind
+	// failures surface through the exited channel instead of stderr.
+	daemon.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := daemon.Start(); err != nil {
+		return fmt.Errorf("launch: start %s adapter: %w", cmd.Runtime, err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- daemon.Wait() }()
+
+	client, err := awaitSession(cmd.Session, daemon, exited)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Call(protocol.Request{Cmd: protocol.CmdLaunch, APK: cmd.Path}, launchDeadline)
+	_ = client.Close()
+	if err != nil {
+		stopDaemon(daemon)
+		return fmt.Errorf("launch: handshake failed: %w", err)
+	}
+	if resp.Error != "" {
+		stopDaemon(daemon)
+		return fmt.Errorf("launch failed: %s", resp.Error)
+	}
+
+	base := filepath.Base(cmd.Path)
+	if resp.PID > 0 {
+		fmt.Fprintf(stdout, "launched %s — session %q (adapter pid %d)\n", base, cmd.Session, resp.PID)
+	} else {
+		fmt.Fprintf(stdout, "launched %s — session %q\n", base, cmd.Session)
+	}
+	return nil
+}
+
+// awaitSession dials the session socket until the daemon accepts, the
+// daemon dies, or the deadline passes.
+func awaitSession(session string, daemon *exec.Cmd, exited <-chan error) (*runtime.Client, error) {
+	deadline := time.Now().Add(launchDeadline)
+	for {
+		c, err := runtime.DialSession(session, 250*time.Millisecond)
+		if err == nil {
+			return c, nil
+		}
+		select {
+		case e := <-exited:
+			return nil, fmt.Errorf("launch: adapter exited before accepting connections: %v", e)
+		default:
+		}
+		if time.Now().After(deadline) {
+			stopDaemon(daemon)
+			return nil, fmt.Errorf("launch: adapter did not accept a connection within %s", launchDeadline)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+// stopDaemon terminates the daemon's whole process group (it runs detached
+// via setsid, so the process handle alone is not enough). If the group kill
+// fails — e.g. the process was started without its own group — fall back to
+// the single process, so a daemon never outlives a failed launch.
+func stopDaemon(daemon *exec.Cmd) {
+	if daemon == nil || daemon.Process == nil {
+		return
+	}
+	if err := syscall.Kill(-daemon.Process.Pid, syscall.SIGTERM); err != nil {
+		_ = daemon.Process.Kill()
+	}
 }
 
 // resolveCurrent dumps, parses and resolves one ref against the live view
