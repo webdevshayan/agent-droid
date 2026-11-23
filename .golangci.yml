@@ -1,0 +1,12 @@
+# AGD-26: the lint workflow's configuration. Conservative by design — the
+# codebase's deliberate `_ =` releases and unchecked stdout writes are part
+# of the output contract, so errcheck stays off; govet/staticcheck/unused/
+# ineffassign carry the signal.
+version: 2
+linters:
+  default: none
+  enable:
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused

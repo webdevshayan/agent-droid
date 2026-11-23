@@ -12,6 +12,11 @@ package tests_test
 // argv can never carry a 500 MB string (the kernel caps exec arguments),
 // so these tests hit the same layers a real invocation would: cli.Parse
 // and device.ValidateText, exactly the functions `type` flows through.
+//
+// Memory note (AGD-13): under -race the instrumented payloads inflate
+// several-fold and this phase can OOM a small machine. The heavy tests
+// skip themselves under -short, so `go test -race -short ./tests` is the
+// constrained-environment lane; CI runs the full suite on 7 GB runners.
 
 import (
 	"fmt"
@@ -198,6 +203,9 @@ func humanAlloc(n uint64) string {
 }
 
 func TestHackingTypeMultiArgOversizeNoJoinCopy(t *testing.T) {
+	if testing.Short() {
+		t.Skip("memory phase needs the full run")
+	}
 	// AGD-12: the multi-argument form used to join all positionals (full
 	// allocation) before the length check. The cap must be enforced from
 	// the argument lengths alone, before any joined copy exists.

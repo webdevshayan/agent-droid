@@ -30,9 +30,13 @@ plug into the same contract — see
 go install github.com/webdevshayan/agent-droid/core/cmd/agentdroid@latest
 ```
 
-Zero third-party dependencies — one static binary. (Before the first tag,
-install from source: `git clone https://github.com/webdevshayan/agent-droid &&
-go install ./core/cmd/agentdroid`.)
+Zero third-party dependencies — one static binary. Releases are tagged
+`core/vX.Y.Z` (the nested module needs the `core/` prefix), so `@latest`
+resolves to the newest tagged release instead of a main-branch pseudo-
+version; the release workflow stamps that version into the binary —
+`agentdroid --version` tells the truth on release builds and per-tag
+binaries are attached to the GitHub release. Dev builds report the
+compile-time default (0.1.0).
 
 ## Try it in 30 seconds — no device, no adb
 
@@ -75,9 +79,10 @@ Z.ai agent mode, Claude Code, Cursor, Codex CLI — can drive a phone with this.
 
 The [`tests/`](tests/) module owns quality:
 
-- **Fuzzing** — `FuzzParseArgs`, `FuzzParseXML`, `FuzzParseRef` hammer the CLI
-  parser, the view-tree parser and ref resolution (millions of executions, zero
-  crashes).
+- **Fuzzing** — `FuzzParseArgs`, `FuzzParseXML`, `FuzzParseRef` (plus the
+  session tree's `FuzzParseTree`) run in CI at 30 s per target with a
+  scheduled weekly long-fuzz lane at 10 min per target — zero crashes so
+  far.
 - **Memory-abuse phase** — 0-byte and 500 MB payloads are thrown at `type` and
   the dump parser; rejections must be linear-time with O(1) allocation.
 - **Coverage gate** — ≥ 90% across all `core/` packages, enforced in CI.

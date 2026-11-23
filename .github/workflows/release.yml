@@ -1,0 +1,50 @@
+name: release
+
+# AGD-27 / AGD-18: a tag alone is not a distribution. Pushing core/vX.Y.Z
+# builds stamped binaries for the common targets and publishes them as a
+# GitHub release, so --version tells the truth and `go install ...@latest`
+# resolves to the tagged release instead of a main-branch pseudo-version.
+
+on:
+  push:
+    tags: ['core/v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go.mod
+
+      - name: Build release binaries (version stamped from the tag)
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -e
+          VERSION="${TAG#core/v}"
+          echo "version: ${VERSION}"
+          mkdir -p dist
+          for t in linux/amd64 linux/arm64 darwin/arm64 windows/amd64; do
+            os=${t%%/*}; arch=${t##*/}
+            ext=""
+            [ "$os" = "windows" ] && ext=".exe"
+            out="dist/agentdroid-${os}-${arch}${ext}"
+            GOOS="$os" GOARCH="$arch" go build -trimpath \
+              -ldflags "-s -w -X github.com/webdevshayan/agent-droid/core/app.Version=${VERSION}" \
+              -o "$out" ./core/cmd/agentdroid
+            echo "built $out"
+          done
+
+      - name: Publish the GitHub release with the binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" dist/* \
+            --title "agentdroid ${TAG#core/v}" \
+            --notes "Binaries for ${TAG}. \`go install github.com/webdevshayan/agent-droid/core/cmd/agentdroid@${TAG}\` pins this release; the binaries report the same version via \`agentdroid --version\`. Zero third-party dependencies — each binary is static."
