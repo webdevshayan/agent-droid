@@ -29,11 +29,13 @@ jobs:
           VERSION="${TAG#core/v}"
           echo "version: ${VERSION}"
           mkdir -p dist
-          for t in linux/amd64 linux/arm64 darwin/arm64 windows/amd64; do
+          # Session mode (the whole point of the runtime backends) is
+          # Linux-only by design — abstract Unix sockets and process-group
+          # control (Setpgid/kill) — so the release ships Unix targets and
+          # says so. Windows has no supported build of internal/runtime.
+          for t in linux/amd64 linux/arm64 darwin/arm64; do
             os=${t%%/*}; arch=${t##*/}
-            ext=""
-            [ "$os" = "windows" ] && ext=".exe"
-            out="dist/agentdroid-${os}-${arch}${ext}"
+            out="dist/agentdroid-${os}-${arch}"
             GOOS="$os" GOARCH="$arch" go build -trimpath \
               -ldflags "-s -w -X github.com/webdevshayan/agent-droid/core/app.Version=${VERSION}" \
               -o "$out" ./core/cmd/agentdroid
@@ -47,4 +49,4 @@ jobs:
         run: |
           gh release create "$TAG" dist/* \
             --title "agentdroid ${TAG#core/v}" \
-            --notes "Binaries for ${TAG}. \`go install github.com/webdevshayan/agent-droid/core/cmd/agentdroid@${TAG}\` pins this release; the binaries report the same version via \`agentdroid --version\`. Zero third-party dependencies — each binary is static."
+            --notes "Binaries for ${TAG} (linux/amd64, linux/arm64, darwin/arm64). Session mode is Linux-only by design: it needs abstract Unix sockets and process-group control. \`go install github.com/webdevshayan/agent-droid/core/cmd/agentdroid@${TAG}\` pins this release; the binaries report the same version via \`agentdroid --version\`. Zero third-party dependencies — each binary is static."
