@@ -131,7 +131,7 @@ func TestSessionLaunchSnapshotTapTypeScreenshotClose(t *testing.T) {
 	if _, _, code = runAppCLI(t, "type", "hunter2", "--session", session); code != 0 {
 		t.Fatalf("type password exit %d", code)
 	}
-	stdout, _, code = runAppCLI(t, "tap", "@e6", "--session", session)
+	_, _, code = runAppCLI(t, "tap", "@e6", "--session", session)
 	if code != 0 {
 		t.Fatalf("tap sign-in exit %d", code)
 	}
