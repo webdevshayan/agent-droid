@@ -129,7 +129,7 @@ func dispatch(d driver.Driver, cmd cli.Command, stdout, stderr io.Writer) error 
 			return err
 		}
 		if len(els) == 0 {
-			fmt.Fprintln(stdout, "no tappable elements found on screen")
+			fmt.Fprintln(stdout, "no elements with valid bounds found on screen")
 			return nil
 		}
 		fmt.Fprint(stdout, snapshot.Format(els))

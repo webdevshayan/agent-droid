@@ -61,8 +61,8 @@ adapter protocol.
 
 ## How an AI agent uses it
 
-1. `agentdroid snapshot` — every interactive element comes back as one line
-   with a ref: `@e1 android.widget.Button text="Sign in" clickable bounds=… center=(540,460)`.
+1. `agentdroid snapshot` — every element with valid bounds comes back as one
+   line with a ref: `@e1 android.widget.Button text="Sign in" clickable bounds=… center=(540,460)`.
 2. `agentdroid tap @e3`, `agentdroid type "text"`, `agentdroid swipe @e1 @e2` — act by ref, no coordinate guessing.
 3. `agentdroid snapshot` again — refs always resolve against the *current*
    screen, so snapshot-after-every-action is the loop.

@@ -52,7 +52,7 @@ $ agentdroid --runtime fake snapshot
 | `agentdroid devices` | list attached devices (adb runtime; fails with a clear error if none) |
 | `agentdroid launch <path.apk>` | adb: validate then `install -r` the APK · fake: start the simulated app |
 | `agentdroid close` | adb: send HOME (app stays installed, backgrounded) · fake: end the session |
-| `agentdroid snapshot` | dump the screen; print one line per tappable element with its ref |
+| `agentdroid snapshot` | dump the screen; print one line per element with valid bounds, with its ref |
 | `agentdroid snapshot --xml` | print the raw view-tree XML instead |
 | `agentdroid tap @eN` | tap the element's center |
 | `agentdroid type <text>` | type into the focused element (tap a field first) |

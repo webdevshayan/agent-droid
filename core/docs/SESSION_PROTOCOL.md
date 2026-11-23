@@ -91,11 +91,14 @@ fields without breaking deployed adapters.
 ## Element references
 
 The CLI flattens the tree depth-first (pre-order) and assigns refs
-`@e1`, `@e2`, … to every view that is clickable, focusable, or carries text,
-a description, or a resource id. `tap @eN` and `type @eN` are resolved by the
-CLI against a **fresh snapshot at command time**, then sent as coordinates.
-Refs therefore never go stale between CLI invocations, and neither the CLI nor
-the adapter needs an on-disk element map.
+`@e1`, `@e2`, … to **every view with valid bounds** — refs are positional,
+not clickability-filtered (the `clickable` flag is shown when true), and a
+node with missing or malformed `bounds` gets no ref. `tap @eN` is resolved
+by the CLI against a **fresh snapshot at command time** and sent as
+coordinates. `type` takes literal text and goes to the field focused by an
+earlier `tap`; there is no `type @eN` form. Refs therefore never go stale
+between CLI invocations, and neither the CLI nor the adapter needs an
+on-disk element map.
 
 ## Implementing an adapter
 
