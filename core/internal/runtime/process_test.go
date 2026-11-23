@@ -101,3 +101,54 @@ func TestTerminateKillsProcessGroup(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+func TestProcessBackendDetectsCrash(t *testing.T) {
+	// AGD-10: a launcher that exits right after spawn must be reaped and
+	// reported honestly — Snapshot may not answer the hook error as if the
+	// runtime were alive, and a relaunch must be possible.
+	b := newProcessBackend("atl", makeApk(t), "", "", "", "true")
+	pb := b.(*processBackend)
+	pb.argsTmpl = []string{} // `true` takes no arguments and exits at once
+
+	if resp := pb.Launch(""); !resp.OK {
+		t.Fatalf("launch: %s", resp.Error)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		pb.mu.Lock()
+		exited := pb.exited
+		pb.mu.Unlock()
+		if exited {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the reaper never recorded the launcher exit")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if resp := pb.Snapshot(); resp.OK || !strings.Contains(resp.Error, "runtime exited") {
+		t.Fatalf("snapshot after a launcher crash must report the exit, got %+v", resp)
+	}
+	if resp := pb.Tap(1, 1); resp.OK || !strings.Contains(resp.Error, "runtime exited") {
+		t.Fatalf("tap after a launcher crash must report the exit, got %+v", resp)
+	}
+	// A fresh launch must be possible again — never "already running".
+	if resp := pb.Launch(""); !resp.OK {
+		t.Fatalf("relaunch after exit refused: %s", resp.Error)
+	}
+	pb.Stop()
+}
+
+func TestProcessBackendStillRefusesDoubleLaunch(t *testing.T) {
+	// While the launcher is genuinely alive, a second launch is refused.
+	b := newProcessBackend("atl", makeApk(t), "", "AGENTDROID_ATL_BIN", "AGENTDROID_ATL_ARGS", "sleep")
+	pb := b.(*processBackend)
+	pb.argsTmpl = []string{"30"}
+	if resp := pb.Launch(""); !resp.OK {
+		t.Fatalf("launch: %s", resp.Error)
+	}
+	if resp := pb.Launch(""); resp.OK || !strings.Contains(resp.Error, "already running") {
+		t.Fatalf("second launch must be refused with \"already running\", got %+v", resp)
+	}
+	pb.Stop()
+}

@@ -294,9 +294,17 @@ func sessionLaunch(cmd cli.Command, stdout io.Writer) error {
 		bin = self
 	}
 	daemon := exec.Command(bin, "serve", "--backend", cmd.Runtime, "--session", cmd.Session)
-	// Detached daemons get /dev/null stdio: an inherited pipe would keep
-	// whoever ran `launch` waiting for EOF until the daemon exits. Bind
-	// failures surface through the exited channel instead of stderr.
+	// Detached daemons must not inherit the launcher's pipes — whoever ran
+	// `launch` would wait for EOF until the daemon exits. But /dev/null made
+	// every launch failure undebuggable: adapter logs and bind errors now
+	// land in a 0600 log file whose path is printed on success and attached
+	// to every launch failure.
+	logPath := ""
+	if logf, err := os.CreateTemp("", "agentdroid-"+cmd.Session+"-*.log"); err == nil {
+		logPath = logf.Name()
+		daemon.Stdout, daemon.Stderr = logf, logf
+		defer logf.Close()
+	}
 	daemon.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := daemon.Start(); err != nil {
 		return fmt.Errorf("launch: start %s adapter: %w", cmd.Runtime, err)
@@ -306,26 +314,35 @@ func sessionLaunch(cmd cli.Command, stdout io.Writer) error {
 
 	client, err := awaitSession(cmd.Session, daemon, exited)
 	if err != nil {
-		return err
+		return withLogHint(err, logPath)
 	}
 	resp, err := client.Call(protocol.Request{Cmd: protocol.CmdLaunch, APK: cmd.Path}, launchDeadline)
 	_ = client.Close()
 	if err != nil {
 		stopDaemon(daemon)
-		return fmt.Errorf("launch: handshake failed: %w", err)
+		return withLogHint(fmt.Errorf("launch: handshake failed: %w", err), logPath)
 	}
 	if resp.Error != "" {
 		stopDaemon(daemon)
-		return fmt.Errorf("launch failed: %s", resp.Error)
+		return withLogHint(fmt.Errorf("launch failed: %s", resp.Error), logPath)
 	}
 
 	base := filepath.Base(cmd.Path)
 	if resp.PID > 0 {
-		fmt.Fprintf(stdout, "launched %s — session %q (adapter pid %d)\n", base, cmd.Session, resp.PID)
+		fmt.Fprintf(stdout, "launched %s — session %q (adapter pid %d, daemon log %s)\n", base, cmd.Session, resp.PID, logPath)
 	} else {
-		fmt.Fprintf(stdout, "launched %s — session %q\n", base, cmd.Session)
+		fmt.Fprintf(stdout, "launched %s — session %q (daemon log %s)\n", base, cmd.Session, logPath)
 	}
 	return nil
+}
+
+// withLogHint attaches the daemon log path to a launch failure, so an
+// undebuggable silent daemon becomes a one-file diagnosis.
+func withLogHint(err error, logPath string) error {
+	if err == nil || logPath == "" {
+		return err
+	}
+	return fmt.Errorf("%w (daemon log: %s)", err, logPath)
 }
 
 // awaitSession dials the session socket until the daemon accepts, the

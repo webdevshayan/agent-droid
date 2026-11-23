@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -32,6 +33,9 @@ type processBackend struct {
 	bin      string
 	argsTmpl []string
 	cmd      *exec.Cmd
+	done     chan struct{} // closed by the reaper once the launcher exits
+	exited   bool
+	exitErr  error
 }
 
 // NewATLBackend drives the Android Translation Layer launcher. The binary is
@@ -71,7 +75,17 @@ func (b *processBackend) Launch(apk string) *protocol.Response {
 		return errResp("launch: no apk given")
 	}
 	if b.cmd != nil {
-		return errResp("launch: %s runtime already running (pid %d)", b.name, b.cmd.Process.Pid)
+		select {
+		case <-b.done:
+			// The launcher died after spawning: report nothing false here.
+			// The exited error surfaces below on demand; a fresh launch is
+			// exactly what the operator wants now.
+			b.cmd = nil
+			b.exited = false
+			b.exitErr = nil
+		default:
+			return errResp("launch: %s runtime already running (pid %d)", b.name, b.cmd.Process.Pid)
+		}
 	}
 	path, err := exec.LookPath(b.bin)
 	if err != nil {
@@ -85,21 +99,52 @@ func (b *processBackend) Launch(apk string) *protocol.Response {
 		args[i] = strings.ReplaceAll(a, "{apk}", b.apk)
 	}
 	cmd := exec.Command(path, args...)
-	cmd.Stdout = os.Stderr // runtime logs go to the session stderr, never to files
+	cmd.Stdout = os.Stderr // runtime logs go to the daemon's stderr (see app.sessionLaunch)
 	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		return errResp("launch: start %s runtime: %v", b.name, err)
 	}
 	b.cmd = cmd
+	b.done = make(chan struct{})
+	b.exited = false
+	b.exitErr = nil
+	// Reap the child the moment it exits, whatever the reason. Without a
+	// reaper a launcher crash is invisible: Launch answers "already
+	// running (pid N)" for a corpse and Snapshot answers the hook error as
+	// if the runtime were alive. done closes BEFORE the state write —
+	// anyone waiting on done must not depend on this mutex, or the wait
+	// and the reaper deadlock each other.
+	go func() {
+		err := cmd.Wait()
+		close(b.done)
+		b.mu.Lock()
+		if b.cmd == cmd { // still the live process (not killed/replaced)
+			b.exited = true
+			b.exitErr = err
+		}
+		b.mu.Unlock()
+	}()
 	return okResp(cmd.Process.Pid)
+}
+
+// aliveErrLocked names the honest state of the runtime process: "" when it
+// is running, the error text when it is not.
+func (b *processBackend) aliveErrLocked() string {
+	if b.cmd == nil {
+		return fmt.Sprintf("no %s runtime running; launch first", b.name)
+	}
+	if b.exited {
+		return fmt.Sprintf("%s runtime exited (pid %d): %v — launch again", b.name, b.cmd.Process.Pid, b.exitErr)
+	}
+	return ""
 }
 
 func (b *processBackend) Snapshot() *protocol.Response {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.cmd == nil {
-		return errResp("no %s runtime running; launch first", b.name)
+	if msg := b.aliveErrLocked(); msg != "" {
+		return errResp("%s", msg)
 	}
 	return errResp("snapshot: %v", errRuntimeHook)
 }
@@ -107,8 +152,8 @@ func (b *processBackend) Snapshot() *protocol.Response {
 func (b *processBackend) Tap(x, y int) *protocol.Response {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.cmd == nil {
-		return errResp("no %s runtime running; launch first", b.name)
+	if msg := b.aliveErrLocked(); msg != "" {
+		return errResp("%s", msg)
 	}
 	return errResp("tap: %v", errRuntimeHook)
 }
@@ -116,8 +161,8 @@ func (b *processBackend) Tap(x, y int) *protocol.Response {
 func (b *processBackend) Type(x, y int, text string) *protocol.Response {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.cmd == nil {
-		return errResp("no %s runtime running; launch first", b.name)
+	if msg := b.aliveErrLocked(); msg != "" {
+		return errResp("%s", msg)
 	}
 	return errResp("type: %v", errRuntimeHook)
 }
@@ -125,31 +170,45 @@ func (b *processBackend) Type(x, y int, text string) *protocol.Response {
 func (b *processBackend) Screenshot() *protocol.Response {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.cmd == nil {
-		return errResp("no %s runtime running; launch first", b.name)
+	if msg := b.aliveErrLocked(); msg != "" {
+		return errResp("%s", msg)
 	}
 	return errResp("screenshot: %v", errRuntimeHook)
 }
 
 func (b *processBackend) Close() *protocol.Response {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.killLocked()
+	b.kill()
 	return &protocol.Response{OK: true}
 }
 
 func (b *processBackend) Stop() {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.killLocked()
+	b.kill()
 }
 
-func (b *processBackend) killLocked() {
-	if b.cmd == nil {
+// kill terminates the runtime process group and waits for the reaper to
+// confirm the exit. The wait happens WITHOUT the mutex — the reaper must be
+// free to run, so holding the lock across the wait would deadlock it.
+func (b *processBackend) kill() {
+	b.mu.Lock()
+	cmd, done := b.cmd, b.done
+	b.cmd = nil
+	if cmd != nil {
+		pgid := -cmd.Process.Pid
+		if err := syscall.Kill(pgid, syscall.SIGTERM); err != nil {
+			_ = cmd.Process.Kill()
+		}
+	}
+	b.mu.Unlock()
+
+	if done == nil {
 		return
 	}
-	terminate(b.cmd)
-	b.cmd = nil
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		<-done
+	}
 }
 
 // terminate stops a spawned runtime process group: SIGTERM first, then

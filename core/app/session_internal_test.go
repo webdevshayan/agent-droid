@@ -48,6 +48,10 @@ func TestSessionLaunchAdapterDies(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "exited before accepting connections") {
 		t.Fatalf("sessionLaunch with a dying adapter = %v", err)
 	}
+	if !strings.Contains(err.Error(), "daemon log: ") {
+		// AGD-11: the failure must point at the daemon's log file.
+		t.Fatalf("launch failure must carry the daemon log hint, got %v", err)
+	}
 }
 
 // TestDispatchUnknownVerbIsAnError pins the defensive default case: a verb
