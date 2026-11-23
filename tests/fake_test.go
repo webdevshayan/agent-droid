@@ -326,3 +326,41 @@ func TestFakeDriverSaveFailureSurfaces(t *testing.T) {
 		t.Fatalf("key must surface the state-write failure, got %v", err)
 	}
 }
+
+func TestFakeDriverControlCharsRoundTrip(t *testing.T) {
+	// AGD-24: control characters typed into the fake must survive the
+	// dump→parse round trip as themselves, not as literal backslash
+	// escapes. (adb's input text still rejects them; this is fake-only.)
+	fakeEnv(t)
+	f := driver.OpenFake()
+	if err := f.Launch(demoAPK(t)); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Tap(540, 260); err != nil {
+		t.Fatal(err)
+	}
+	payload := "x\nnewline\ty\u007fend"
+	if err := f.Type(payload); err != nil {
+		t.Fatalf("fake Type must accept control characters: %v", err)
+	}
+	raw, err := f.Dump()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "\\n") || strings.Contains(string(raw), "\\t") {
+		t.Fatalf("control characters must be numeric character refs, not Go escapes:\n%s", raw)
+	}
+	els, err := snapshot.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, el := range els {
+		if el.Text == payload {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("control characters must round-trip verbatim through the parser")
+	}
+}

@@ -516,3 +516,18 @@ func TestFakeRuntimeDumpIsParseable(t *testing.T) {
 		t.Fatalf("@e3 = %+v, %v", el, err)
 	}
 }
+
+func TestFakeRuntimeSwipeHonestyNote(t *testing.T) {
+	// AGD-14: the fake ignores swipes; the CLI must say so on stderr
+	// instead of leaving a bare success line that implies movement.
+	fakeEnv(t)
+	fa := []string{"--runtime", "fake"}
+	runApp(t, append(fa, "launch", demoAPK(t)), nil)
+	code, out, errOut := runApp(t, append(fa, "swipe", "@e1", "@e3"), nil)
+	if code != 0 || !strings.Contains(out, "swiped @e1") {
+		t.Fatalf("swipe exit=%d out=%q", code, out)
+	}
+	if !strings.Contains(errOut, "ignored by the fake runtime") {
+		t.Fatalf("swipe must print the honesty note on stderr, got %q", errOut)
+	}
+}

@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/draw"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -176,7 +177,7 @@ func (f *Fake) Dump() ([]byte, error) {
 			clickable = "true"
 		}
 		fmt.Fprintf(&b,
-			"  <node text=%q resource-id=%q class=%q content-desc=\"\" clickable=%q enabled=\"true\" scrollable=\"false\" bounds=\"[%d,%d][%d,%d]\"/>\n",
+			"  <node text=\"%s\" resource-id=%q class=%q content-desc=\"\" clickable=%q enabled=\"true\" scrollable=\"false\" bounds=\"[%d,%d][%d,%d]\"/>\n",
 			xmlEscape(el.text), el.id, el.class, clickable,
 			el.rect[0], el.rect[1], el.rect[2], el.rect[3])
 	}
@@ -184,6 +185,11 @@ func (f *Fake) Dump() ([]byte, error) {
 	return []byte(b.String()), nil
 }
 
+// xmlEscape escapes the five XML specials and renders control characters as
+// numeric character references. The numeric form matters: a literal newline
+// or tab inside an attribute value would be normalized to a space by the XML
+// parser, but character references survive parsing intact — so typed text
+// round-trips byte-for-byte, control characters included.
 func xmlEscape(s string) string {
 	var b bytes.Buffer
 	for _, r := range s {
@@ -199,7 +205,11 @@ func xmlEscape(s string) string {
 		case '\'':
 			b.WriteString("&apos;")
 		default:
-			b.WriteRune(r)
+			if r < 0x20 || r == 0x7f {
+				fmt.Fprintf(&b, "&#%d;", r)
+			} else {
+				b.WriteRune(r)
+			}
 		}
 	}
 	return b.String()
@@ -272,7 +282,9 @@ func (f *Fake) Type(text string) error {
 	return nil
 }
 
-// Swipe is a no-op on the fake screens (documented in the protocol doc).
+// Swipe is a no-op on the fake screens (they do not scroll). The CLI prints
+// an explicit note when the fake ignores a swipe, so the agent sees the
+// honest result instead of inferring one from a bare success line.
 func (f *Fake) Swipe(x1, y1, x2, y2, durationMs int) error {
 	for _, n := range []int{x1, y1, x2, y2} {
 		if err := checkCoord(n); err != nil {
@@ -336,16 +348,10 @@ func (f *Fake) Screenshot() ([]byte, error) {
 		base = color.RGBA{0x1f, 0x6f, 0xeb, 0xff}
 	}
 	img := image.NewRGBA(image.Rect(0, 0, 1080, 2400))
-	for y := 0; y < 2400; y++ {
-		for x := 0; x < 1080; x++ {
-			img.Set(x, y, base)
-		}
-	}
-	for y := 0; y < 140; y++ {
-		for x := 0; x < 1080; x++ {
-			img.Set(x, y, color.RGBA{0xf0, 0xf6, 0xfc, 0xff})
-		}
-	}
+	// Uniform fills via image/draw — the per-pixel img.Set version did the
+	// same work about an order of magnitude slower.
+	draw.Draw(img, img.Bounds(), &image.Uniform{base}, image.Point{}, draw.Src)
+	draw.Draw(img, image.Rect(0, 0, 1080, 140), &image.Uniform{color.RGBA{0xf0, 0xf6, 0xfc, 0xff}}, image.Point{}, draw.Src)
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
 		return nil, fmt.Errorf("screenshot: %w", err)
