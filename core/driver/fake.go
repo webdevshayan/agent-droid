@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 const (
@@ -48,21 +49,104 @@ type fakeState struct {
 // Fake is the simulated-app driver.
 type Fake struct {
 	state fakeState
+	lock  *stateLock
 }
 
-// fakeStatePath comes from AGENTDROID_FAKE_STATE (tests use a temp file)
-// and defaults to a session file in the OS temp dir.
+// fakeStatePath comes from AGENTDROID_FAKE_STATE (tests and CI use it) and
+// defaults to a file under the user's cache directory. The old default — a
+// fixed, world-known name in the OS temp dir — was attacker-chosen real
+// estate on multi-user machines (another user could pre-create it as a
+// symlink); the cache dir is user-scoped and 0700.
 func fakeStatePath() string {
 	if p := os.Getenv("AGENTDROID_FAKE_STATE"); p != "" {
 		return p
 	}
-	return filepath.Join(os.TempDir(), "agentdroid-fake-state.json")
+	dir, err := os.UserCacheDir()
+	if err != nil || dir == "" {
+		dir = os.TempDir() // headless containers without a HOME
+	}
+	return filepath.Join(dir, "agentdroid", "fake-state.json")
 }
 
-// OpenFake loads the persisted fake session (or starts blank).
+// ensureStateDir creates the state file's parent directory when missing.
+func ensureStateDir(p string) error {
+	dir := filepath.Dir(p)
+	if dir == "" || dir == "." {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	return nil
+}
+
+// stateLock guards read-modify-write on the fake state file across
+// processes: concurrent agentdroid invocations used to last-write-win, so
+// typed text could silently vanish when an agent parallelized commands.
+// A sidecar .lock file — a stable inode, unlike the state file that Close
+// removes — is flock-ed exclusively for the Fake's lifetime; the kernel
+// releases it when the process exits. Locks are reference-counted per
+// process so several Fakes on one path (tests) do not deadlock.
+type stateLock struct {
+	path string
+	f    *os.File
+	refs int
+}
+
+var stateLocks = struct {
+	mu sync.Mutex
+	m  map[string]*stateLock
+}{m: map[string]*stateLock{}}
+
+// acquireStateLock flocks path+".lock" exclusively. Locking is best-effort:
+// on failure the fake proceeds unlocked rather than breaking the command —
+// the honest error would otherwise block single-user machines for nothing.
+func acquireStateLock(statePath string) *stateLock {
+	p := statePath + ".lock"
+	if err := ensureStateDir(p); err != nil {
+		return nil
+	}
+	stateLocks.mu.Lock()
+	defer stateLocks.mu.Unlock()
+	if l, ok := stateLocks.m[p]; ok {
+		l.refs++
+		return l
+	}
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil
+	}
+	if err := flockExclusive(f); err != nil {
+		f.Close()
+		return nil
+	}
+	l := &stateLock{path: p, f: f, refs: 1}
+	stateLocks.m[p] = l
+	return l
+}
+
+func (l *stateLock) release() {
+	if l == nil {
+		return
+	}
+	stateLocks.mu.Lock()
+	defer stateLocks.mu.Unlock()
+	l.refs--
+	if l.refs > 0 {
+		return
+	}
+	funlock(l.f)
+	l.f.Close()
+	delete(stateLocks.m, l.path)
+}
+
+// OpenFake loads the persisted fake session (or starts blank) and takes the
+// state lock for this process's lifetime.
 func OpenFake() *Fake {
+	p := fakeStatePath()
 	var f Fake
-	if data, err := os.ReadFile(fakeStatePath()); err == nil {
+	f.lock = acquireStateLock(p)
+	if data, err := os.ReadFile(p); err == nil {
 		_ = json.Unmarshal(data, &f.state)
 	}
 	return &f
@@ -78,6 +162,9 @@ func (f *Fake) save() error {
 		return fmt.Errorf("fake state encode: %w", err)
 	}
 	p := fakeStatePath()
+	if err := ensureStateDir(p); err != nil {
+		return fmt.Errorf("fake state write failed (%s): %w", p, err)
+	}
 	if err := os.WriteFile(p, data, 0o600); err != nil {
 		return fmt.Errorf("fake state write failed (%s): %w", p, err)
 	}
@@ -102,7 +189,8 @@ func (f *Fake) Launch(apk string) error {
 	return nil
 }
 
-// Close terminates the simulated app and clears the session file.
+// Close terminates the simulated app, clears the session file and releases
+// the state lock.
 func (f *Fake) Close() error {
 	if err := f.running(); err != nil {
 		return err
@@ -115,6 +203,8 @@ func (f *Fake) Close() error {
 	if err := os.Remove(fakeStatePath()); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("close: %w", err)
 	}
+	f.lock.release()
+	f.lock = nil
 	return nil
 }
 

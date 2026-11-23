@@ -286,9 +286,15 @@ func TestFakeDriverClearActuallyClears(t *testing.T) {
 func TestFakeDriverSaveFailureSurfaces(t *testing.T) {
 	// AGD-02: a state file that cannot be written must fail the command
 	// with the state path named — launch must not exit successfully while
-	// persisting nothing.
+	// persisting nothing. (save() creates missing parent directories, so
+	// the blocker here is a FILE sitting where a directory must go — that
+	// fails for root and non-root alike.)
 	dir := t.TempDir()
-	t.Setenv("AGENTDROID_FAKE_STATE", filepath.Join(dir, "missing", "state.json"))
+	blocker := filepath.Join(dir, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTDROID_FAKE_STATE", filepath.Join(blocker, "state.json"))
 	f := driver.OpenFake()
 	err := f.Launch(demoAPK(t))
 	if err == nil || !strings.Contains(err.Error(), "fake state write failed") || !strings.Contains(err.Error(), "state.json") {
