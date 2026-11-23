@@ -4,6 +4,7 @@ package app
 // adapter surfaces a clear error and stopDaemon really terminates.
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/webdevshayan/agent-droid/core/cli"
+	"github.com/webdevshayan/agent-droid/core/driver"
 )
 
 func TestStopDaemonTerminates(t *testing.T) {
@@ -45,5 +47,17 @@ func TestSessionLaunchAdapterDies(t *testing.T) {
 	err := sessionLaunch(cmd, &out)
 	if err == nil || !strings.Contains(err.Error(), "exited before accepting connections") {
 		t.Fatalf("sessionLaunch with a dying adapter = %v", err)
+	}
+}
+
+// TestDispatchUnknownVerbIsAnError pins the defensive default case: a verb
+// the parser accepts but dispatch does not implement must fail loudly, never
+// return exit 0 with no output (AGD-21). Unreachable through the real CLI —
+// the parser rejects unknown verbs first — which is exactly why it must be
+// tested directly.
+func TestDispatchUnknownVerbIsAnError(t *testing.T) {
+	err := dispatch(&driver.Fake{}, cli.Command{Verb: cli.Verb("frobnicate")}, io.Discard, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "unimplemented command") {
+		t.Fatalf("unknown verb must error, got %v", err)
 	}
 }

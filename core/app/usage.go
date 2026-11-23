@@ -9,6 +9,7 @@ against the CURRENT screen, so run ` + "`snapshot`" + ` again after every action
 Usage:
   agentdroid devices                      list attached devices (adb runtime)
   agentdroid launch <path.apk>            install+start an app (fake: session start)
+  agentdroid install <path.apk>           alias of launch
   agentdroid close                        end the session (adb: HOME key)
   agentdroid snapshot [--xml]             print screen elements as refs
   agentdroid tap @eN                      tap an element's center
