@@ -76,6 +76,17 @@ type Command struct {
 	RuntimeBin string // --runtime-bin: override the adapter binary
 }
 
+// isNegativeNumber reports whether arg is a bare negative integer ("-10").
+// Only digits follow the dash: real flags (-s, --session) never parse as
+// integers, so they keep the flag path.
+func isNegativeNumber(arg string) bool {
+	if len(arg) < 2 || arg[0] != '-' {
+		return false
+	}
+	_, err := strconv.Atoi(arg[1:])
+	return err == nil
+}
+
 // Parse turns one argv (without the program name) into a Command.
 // Flag values may appear anywhere; -h/--help and --version short-circuit
 // everything else. The `--` separator forces the rest to be positional.
@@ -179,6 +190,12 @@ func Parse(argv []string) (Command, error) {
 				return c, errors.New("flag --out requires a non-empty value")
 			}
 			c.Out = argv[i]
+		case isNegativeNumber(arg):
+			// A bare negative number (e.g. `swipe -10 0 100 100`) is a
+			// positional, not a flag: it reaches the coordinate range check
+			// and produces the real diagnostic ("coordinate -10 out of
+			// range") instead of a misleading "unknown flag".
+			pos = append(pos, arg)
 		case strings.HasPrefix(arg, "-") && arg != "-":
 			return c, fmt.Errorf("unknown flag %q; run `agentdroid help`", arg)
 		default:
@@ -238,16 +255,19 @@ func Parse(argv []string) (Command, error) {
 		if len(pos) < 2 {
 			return c, errors.New(`type needs text to type, e.g. agentdroid type "hello world"`)
 		}
-		// Length check first (O(1), no copy, no scan) so oversized
-		// payloads are rejected before any work is done on them.
-		var text string
-		if len(pos) == 2 {
-			text = pos[1]
-		} else {
-			text = strings.Join(pos[1:], " ")
+		// Length check before any copy: O(1) — a sum of the argument
+		// lengths — so oversized payloads are rejected without allocating
+		// the joined text. True for the multi-argument form too.
+		total := len(pos) - 2 // the separating spaces
+		for _, a := range pos[1:] {
+			total += len(a)
 		}
-		if len(text) > MaxTextLen {
-			return c, fmt.Errorf("type: text is %d bytes, over the %d-byte limit", len(text), MaxTextLen)
+		if total > MaxTextLen {
+			return c, fmt.Errorf("type: text is %d bytes, over the %d-byte limit", total, MaxTextLen)
+		}
+		text := pos[1]
+		if len(pos) > 2 {
+			text = strings.Join(pos[1:], " ")
 		}
 		if strings.TrimSpace(text) == "" {
 			return c, errors.New("type: text is empty")

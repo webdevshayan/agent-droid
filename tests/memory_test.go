@@ -196,3 +196,19 @@ func humanAlloc(n uint64) string {
 		return fmt.Sprintf("%d B", n)
 	}
 }
+
+func TestHackingTypeMultiArgOversizeNoJoinCopy(t *testing.T) {
+	// AGD-12: the multi-argument form used to join all positionals (full
+	// allocation) before the length check. The cap must be enforced from
+	// the argument lengths alone, before any joined copy exists.
+	a := strings.Repeat("a", 100<<20)
+	b := strings.Repeat("b", 100<<20)
+	measure := allocSince(t)
+	_, err := cli.Parse([]string{"type", a, b})
+	if err == nil {
+		t.Fatal("a 200 MB multi-argument payload must be rejected")
+	}
+	if allocated := measure(); allocated > 16<<20 {
+		t.Fatalf("multi-argument rejection allocated %d bytes (%s) — the payload must not be joined before the cap", allocated, humanAlloc(allocated))
+	}
+}
