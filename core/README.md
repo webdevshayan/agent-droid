@@ -200,6 +200,14 @@ output — is treated as untrusted:
 - **No shell interpolation anywhere**: arguments go straight to `exec`, text
   payloads are allowlisted, and there is no path from user text to
   device-shell execution.
+- **Session sockets are local and user-scoped.** A session listens on an
+  abstract Unix socket — no network interface, kernel-only. On Linux the
+  daemon authenticates its peer with the kernel (`SO_PEERCRED`) and closes
+  connections from other OS users before the first request; the protocol
+  itself carries no credentials. The trust boundary is therefore the OS
+  user: any process running as the *same* user can still talk to a session.
+  On a shared account, treat same-user processes as trusted and never run
+  untrusted code under the account that owns sessions.
 - **Fake runtime state** is a JSON file under the user's cache directory
   (`AGENTDROID_FAKE_STATE` overrides), written with `0600` permissions,
   guarded by an advisory flock so concurrent invocations serialize instead
