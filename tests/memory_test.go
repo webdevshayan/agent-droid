@@ -160,7 +160,7 @@ func TestHackingSnapshotOversize(t *testing.T) {
 			if allocated := measure(); allocated > 8<<20 {
 				t.Fatalf("size-guard allocated %d bytes (%s) — nothing should be parsed or copied before the cap", allocated, humanAlloc(allocated))
 			}
-			junk = nil
+			_ = junk
 			runtime.GC()
 		})
 	}

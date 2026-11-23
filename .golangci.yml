@@ -2,9 +2,10 @@
 # codebase's deliberate `_ =` releases and unchecked stdout writes are part
 # of the output contract, so errcheck stays off; govet/staticcheck/unused/
 # ineffassign carry the signal.
-version: 2
+#
+# v1 schema (golangci-lint 1.64.x, the version golangci-lint-action v6 runs).
 linters:
-  default: none
+  disable-all: true
   enable:
     - govet
     - ineffassign

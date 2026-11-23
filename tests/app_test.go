@@ -266,7 +266,7 @@ func TestAppDriverFailurePaths(t *testing.T) {
 	if code != 1 || !strings.Contains(errOut, "device offline") {
 		t.Fatalf("snapshot exit=%d stderr=%q", code, errOut)
 	}
-	code, _, errOut = runApp(t, []string{"tap", "@e1"}, f)
+	code, _, _ = runApp(t, []string{"tap", "@e1"}, f)
 	if code != 1 {
 		t.Fatalf("tap exit=%d", code)
 	}
