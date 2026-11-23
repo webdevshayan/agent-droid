@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -78,7 +79,9 @@ func (r ExecRunner) Output(args ...string) ([]byte, error) {
 	if err != nil {
 		msg := stderr.String()
 		if len(msg) > MaxStderrBytes {
-			msg = msg[:MaxStderrBytes] + "…[truncated]"
+			// Truncate on a rune boundary: cutting mid-rune garbles the
+			// tail of an otherwise UTF-8 device message.
+			msg = strings.ToValidUTF8(msg[:MaxStderrBytes], "") + "…[truncated]"
 		}
 		msg = strings.TrimSpace(msg)
 		if msg == "" {
@@ -149,11 +152,12 @@ func (c *Client) Devices() (string, error) {
 	return listing, nil
 }
 
-const dumpPath = "/sdcard/agentdroid_dump.xml"
-
 // Snapshot dumps the current screen as uiautomator XML. It prefers the
 // one-shot `exec-out uiautomator dump /dev/tty` form and falls back to
-// dump-to-file + cat for older devices.
+// dump-to-file + cat for older devices. The fallback file is named per
+// invocation (pid + timestamp) and removed after it is read: a fixed name
+// on shared storage made concurrent agentdroid processes race on one file
+// and left the dump behind forever.
 func (c *Client) Snapshot() ([]byte, error) {
 	var firstErr error
 	out, err := c.Adb.Output(c.args("exec-out", "uiautomator", "dump", "/dev/tty")...)
@@ -164,13 +168,19 @@ func (c *Client) Snapshot() ([]byte, error) {
 		firstErr = err
 	}
 
-	if _, err := c.Adb.Output(c.args("shell", "uiautomator", "dump", dumpPath)...); err != nil {
+	path := dumpPath()
+	if _, err := c.Adb.Output(c.args("shell", "uiautomator", "dump", path)...); err != nil {
 		if firstErr != nil {
 			return nil, fmt.Errorf("uiautomator dump failed: %v; fallback dump also failed: %v", firstErr, err)
 		}
 		return nil, fmt.Errorf("uiautomator dump failed: %w", err)
 	}
-	out, err = c.Adb.Output(c.args("exec-out", "cat", dumpPath)...)
+	out, err = c.Adb.Output(c.args("exec-out", "cat", path)...)
+	// Best-effort cleanup: the device-side dump is scratch data, not state.
+	// A failed rm must not mask a successful read.
+	if _, rmErr := c.Adb.Output(c.args("shell", "rm", "-f", path)...); rmErr != nil && err == nil {
+		err = fmt.Errorf("dump file %s could not be removed: %v", path, rmErr)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("reading UI dump failed: %w", err)
 	}
@@ -178,6 +188,12 @@ func (c *Client) Snapshot() ([]byte, error) {
 		return nil, errors.New("uiautomator produced no parsable XML (screen may be native chrome or the device is locked)")
 	}
 	return out, nil
+}
+
+// dumpPath is a per-invocation scratch path on shared storage: unique
+// across concurrent agentdroid processes, removed after it is read.
+func dumpPath() string {
+	return fmt.Sprintf("/sdcard/agentdroid_dump_%d_%d.xml", os.Getpid(), time.Now().UnixNano())
 }
 
 func looksLikeXML(out []byte) bool {
@@ -271,8 +287,31 @@ func (c *Client) Install(path string) error {
 	if st.Size() == 0 {
 		return errors.New("install: APK file is empty (0 bytes)")
 	}
+	if err := checkAPKMagic(path); err != nil {
+		return err
+	}
 	_, err = c.Adb.Output(c.args("install", "-r", path)...)
 	return err
+}
+
+// checkAPKMagic verifies the ZIP "PK" signature locally. APKs are ZIP
+// archives and start with PK\x03\x04 (or PK\x05\x06 for an empty archive):
+// a text file named .apk used to ship to adb and fail only device-side,
+// far from the actual mistake.
+func checkAPKMagic(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("install: %w", err)
+	}
+	defer f.Close()
+	head := make([]byte, 4)
+	if _, err := io.ReadFull(f, head); err != nil {
+		return fmt.Errorf("install: cannot read %s: %w", path, err)
+	}
+	if !bytes.HasPrefix(head, []byte("PK\x03\x04")) && !bytes.HasPrefix(head, []byte("PK\x05\x06")) {
+		return fmt.Errorf("install: %s is not a ZIP archive (missing the PK header) — not an installable APK", path)
+	}
+	return nil
 }
 
 // ScreenBytes captures the current screen as raw PNG bytes.

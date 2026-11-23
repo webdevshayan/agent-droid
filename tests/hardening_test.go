@@ -75,8 +75,9 @@ func TestSnapshotNoParsableXML(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "no parsable XML") {
 		t.Fatalf("all-junk fallback chain must end in a clean error, got %v", err)
 	}
-	if len(f.calls) != 3 {
-		t.Fatalf("full fallback chain must run, got %d calls", len(f.calls))
+	if len(f.calls) != 4 {
+		// dump + cat + the best-effort cleanup rm (AGD-15).
+		t.Fatalf("full fallback chain must run (4 calls), got %d", len(f.calls))
 	}
 }
 

@@ -150,6 +150,23 @@ func TestInstallValidation(t *testing.T) {
 	}
 }
 
+func TestInstallRejectsNonZipAPK(t *testing.T) {
+	// AGD-20: a text file named .apk must be rejected locally with the PK
+	// header error — never shipped to adb to fail device-side.
+	dir := t.TempDir()
+	text := filepath.Join(dir, "notzip.apk")
+	if err := os.WriteFile(text, []byte("definitely not a zip archive"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeRunner{}
+	c := &device.Client{Adb: f}
+	err := c.Install(text)
+	if err == nil || !strings.Contains(err.Error(), "missing the PK header") {
+		t.Fatalf("non-ZIP .apk must be rejected locally, got %v", err)
+	}
+	f.assertNoCalls(t)
+}
+
 func TestSnapshotFallbackChain(t *testing.T) {
 	xml := []byte(`<?xml version="1.0"?><hierarchy/>`)
 	var step int
@@ -162,6 +179,11 @@ func TestSnapshotFallbackChain(t *testing.T) {
 			return []byte("UI hierchary dumped to: /sdcard/agentdroid_dump.xml\n"), nil
 		case 3: // fallback cat
 			return xml, nil
+		case 4: // best-effort rm of the per-invocation dump file
+			if !strings.HasPrefix(args[len(args)-1], "/sdcard/agentdroid_dump_") || args[len(args)-2] != "-f" {
+				return nil, errors.New("cleanup must rm -f the per-invocation dump path")
+			}
+			return []byte(""), nil
 		}
 		return nil, errors.New("unexpected extra call")
 	}}
@@ -173,8 +195,15 @@ func TestSnapshotFallbackChain(t *testing.T) {
 	if string(got) != string(xml) {
 		t.Fatalf("Snapshot returned %q, want the XML", got)
 	}
-	if len(f.calls) != 3 {
-		t.Fatalf("fallback should be exactly 3 adb calls, got %d: %v", len(f.calls), f.calls)
+	if len(f.calls) != 4 {
+		t.Fatalf("fallback should be dump + cat + cleanup (4 adb calls), got %d: %v", len(f.calls), f.calls)
+	}
+	dumped := f.calls[1][len(f.calls[1])-1]
+	if !strings.HasPrefix(dumped, "/sdcard/agentdroid_dump_") || !strings.HasSuffix(dumped, ".xml") {
+		t.Fatalf("dump path must be per-invocation, got %q", dumped)
+	}
+	if dumped == "/sdcard/agentdroid_dump.xml" {
+		t.Fatal("the fixed shared dump path must be gone (AGD-15)")
 	}
 }
 
