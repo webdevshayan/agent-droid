@@ -44,7 +44,10 @@ jobs:
           echo "startup: ${MS} ms"
           test "$MS" -lt 500
 
-      - name: Smoke run — in-process fake runtime (no device)
+      # AGD-25: this smoke is wiring-only coverage — the "APK" is a synthetic
+      # PK-header payload, not a real app, so the workflow says so instead of
+      # implying a real install path is exercised.
+      - name: "Smoke run — in-process fake runtime (wiring-only: the APK is a synthetic PK-header payload, not a real app)"
         run: |
           set -e
           APK=/tmp/demo.apk && printf 'PK\x03\x04 demo payload' > "$APK"

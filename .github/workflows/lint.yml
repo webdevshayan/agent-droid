@@ -1,0 +1,33 @@
+name: lint
+
+# AGD-26: quality tooling beyond vet — staticcheck et al. on every push/PR.
+# The linter set is conservative by design: the codebase's deliberate
+# `_ =` and unchecked stdout writes are contract choices, not oversights.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go.mod
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          working-directory: core
+
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tests/go.mod
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          working-directory: tests

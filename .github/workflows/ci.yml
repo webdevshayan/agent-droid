@@ -5,6 +5,10 @@ on:
     branches: [main]
     tags: ['v*']
   pull_request:
+  schedule:
+    # AGD-26: weekly long-fuzz lane (the longfuzz job below only runs on
+    # this event — PR gates keep the 30 s-per-target smoke budgets).
+    - cron: "0 3 * * 1"
 
 jobs:
   test:
@@ -38,6 +42,20 @@ jobs:
           name: coverage
           path: coverage.out
 
+  race-short:
+    # AGD-13: a race lane that fits constrained machines — the memory-abuse
+    # phase skips itself under -short (its payloads inflate severalfold
+    # under race instrumentation). core.yml runs the full suite with -race
+    # on 7 GB runners; this lane makes the race signal cheap and universal.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go.mod
+      - name: "Race detector (short lane: memory-abuse phase skipped)"
+        run: go test -race -short -count=1 ./core/... ./tests/...
+
   fuzz:
     runs-on: ubuntu-latest
     steps:
@@ -54,6 +72,23 @@ jobs:
       - name: Fuzz session view-tree parser
         run: go test ./core/internal/uitree -run '^$' -fuzz FuzzParseTree -fuzztime 30s
 
+  longfuzz:
+    # AGD-26: the long budgets behind the fuzzing claim. Runs weekly (see
+    # the schedule trigger) and does not gate PRs.
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: core/go.mod
+      - name: Long fuzz (10 minutes per target)
+        run: |
+          go test ./tests -run '^$' -fuzz FuzzParseArgs -fuzztime 10m
+          go test ./tests -run '^$' -fuzz FuzzParseXML -fuzztime 10m
+          go test ./tests -run '^$' -fuzz FuzzParseRef -fuzztime 10m
+          go test ./core/internal/uitree -run '^$' -fuzz FuzzParseTree -fuzztime 10m
+
   smoke:
     runs-on: ubuntu-latest
     steps:
@@ -67,7 +102,10 @@ jobs:
           go build -o /tmp/agentdroid ./core/cmd/agentdroid
           /tmp/agentdroid help > /dev/null
           /tmp/agentdroid --version | grep -q agentdroid
-          /tmp/agentdroid --runtime fake launch demo.apk
+          # The fake launch now stats the APK like every other runtime (AGD-07):
+          # hand it a real file.
+          printf 'PK\x03\x04 demo payload' > /tmp/demo.apk
+          /tmp/agentdroid --runtime fake launch /tmp/demo.apk
           /tmp/agentdroid --runtime fake snapshot | grep -q 'Sign in'
           /tmp/agentdroid --runtime fake tap @e2
           /tmp/agentdroid --runtime fake type 'demo@gmail.com'
