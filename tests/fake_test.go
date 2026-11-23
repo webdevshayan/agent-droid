@@ -4,6 +4,7 @@ package tests_test
 // persistence across processes, and the never-panic error contract.
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -42,7 +43,7 @@ func TestFakeDriverStateMachine(t *testing.T) {
 	if err := f.Launch("demo.exe"); err == nil || !strings.Contains(err.Error(), ".apk") {
 		t.Fatalf("non-APK launch must fail, got %v", err)
 	}
-	if err := f.Launch("demo.apk"); err != nil {
+	if err := f.Launch(demoAPK(t)); err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
 
@@ -138,7 +139,7 @@ func TestFakeDriverUnicodeType(t *testing.T) {
 	// through a device shell.
 	fakeEnv(t)
 	f := driver.OpenFake()
-	if err := f.Launch("demo.apk"); err != nil {
+	if err := f.Launch(demoAPK(t)); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.Tap(540, 260); err != nil {
@@ -178,7 +179,7 @@ func TestFakeDriverStateFileEnvOverride(t *testing.T) {
 	// tests); the default lives in the OS temp dir.
 	fakeEnv(t)
 	f := driver.OpenFake()
-	if err := f.Launch("demo.apk"); err != nil {
+	if err := f.Launch(demoAPK(t)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.Dump(); err != nil {
@@ -197,7 +198,7 @@ func TestFakeDriverXMLEscaping(t *testing.T) {
 	// dump and survive a parse round-trip verbatim.
 	fakeEnv(t)
 	f := driver.OpenFake()
-	if err := f.Launch("demo.apk"); err != nil {
+	if err := f.Launch(demoAPK(t)); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.Tap(540, 260); err != nil {
@@ -232,7 +233,7 @@ func TestFakeDriverXMLEscaping(t *testing.T) {
 func TestFakeDriverTypeLengthCap(t *testing.T) {
 	fakeEnv(t)
 	f := driver.OpenFake()
-	if err := f.Launch("demo.apk"); err != nil {
+	if err := f.Launch(demoAPK(t)); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.Tap(540, 260); err != nil {
@@ -240,5 +241,88 @@ func TestFakeDriverTypeLengthCap(t *testing.T) {
 	}
 	if err := f.Type(string(make([]byte, 4097))); err == nil {
 		t.Fatal("fake Type must honor the 4096-byte cap")
+	}
+}
+
+func TestFakeDriverClearActuallyClears(t *testing.T) {
+	// AGD-01: `clear` is tap + MOVE_END + a DEL sweep; the fake must really
+	// delete the field text instead of printing success over a no-op.
+	fakeEnv(t)
+	f := driver.OpenFake()
+	if err := f.Launch(demoAPK(t)); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Tap(540, 260); err != nil { // focus the username field
+		t.Fatal(err)
+	}
+	if err := f.Type("demo@gmail.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Key(123); err != nil { // KEYCODE_MOVE_END
+		t.Fatal(err)
+	}
+	for i := 0; i < 40; i++ {
+		if err := f.Key(67); err != nil { // KEYCODE_DEL
+			t.Fatal(err)
+		}
+	}
+	raw, err := f.Dump()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "demo@gmail.com") {
+		t.Fatalf("clear must empty the focused field, dump still has it:\n%s", raw)
+	}
+	// The field is empty but still focused and usable.
+	if err := f.Type("abc"); err != nil {
+		t.Fatalf("type after clear: %v", err)
+	}
+	raw, _ = f.Dump()
+	if !strings.Contains(string(raw), "abc") {
+		t.Fatalf("text after clear lost:\n%s", raw)
+	}
+}
+
+func TestFakeDriverSaveFailureSurfaces(t *testing.T) {
+	// AGD-02: a state file that cannot be written must fail the command
+	// with the state path named — launch must not exit successfully while
+	// persisting nothing.
+	dir := t.TempDir()
+	t.Setenv("AGENTDROID_FAKE_STATE", filepath.Join(dir, "missing", "state.json"))
+	f := driver.OpenFake()
+	err := f.Launch(demoAPK(t))
+	if err == nil || !strings.Contains(err.Error(), "fake state write failed") || !strings.Contains(err.Error(), "state.json") {
+		t.Fatalf("launch must surface the state-write failure with the path, got %v", err)
+	}
+	// Nothing was persisted: a fresh driver sees no session.
+	f2 := driver.OpenFake()
+	if _, err := f2.Dump(); err == nil || !strings.Contains(err.Error(), "no fake app running") {
+		t.Fatalf("a failed launch must not leave a running session behind, dump err=%v", err)
+	}
+
+	// A running session whose save path becomes unwritable fails the next
+	// mutating command (skip when root: permissions do not bind root).
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: chmod-based unwritable dir test would not bind")
+	}
+	blocked := t.TempDir()
+	t.Setenv("AGENTDROID_FAKE_STATE", filepath.Join(blocked, "state.json"))
+	if err := f.Launch(demoAPK(t)); err != nil {
+		t.Fatal(err)
+	}
+	ro := filepath.Join(blocked, "ro")
+	if err := os.Mkdir(ro, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(ro, 0o700) })
+	t.Setenv("AGENTDROID_FAKE_STATE", filepath.Join(ro, "state.json"))
+	if err := f.Tap(540, 260); err == nil || !strings.Contains(err.Error(), "fake state write failed") {
+		t.Fatalf("tap must surface the state-write failure, got %v", err)
+	}
+	if err := f.Type("x"); err == nil || !strings.Contains(err.Error(), "fake state write failed") {
+		t.Fatalf("type must surface the state-write failure, got %v", err)
+	}
+	if err := f.Key(4); err == nil || !strings.Contains(err.Error(), "fake state write failed") {
+		t.Fatalf("key must surface the state-write failure, got %v", err)
 	}
 }

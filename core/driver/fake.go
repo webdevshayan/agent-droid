@@ -21,22 +21,27 @@ import (
 )
 
 const (
-	keyBack  = 4
-	keyHome  = 3
-	keyEnter = 66
+	keyBack    = 4
+	keyHome    = 3
+	keyEnter   = 66
+	keyMoveEnd = 123 // KEYCODE_MOVE_END
+	keyDel     = 67  // KEYCODE_DEL (backspace: deletes the rune before the cursor)
 
 	screenMain    = 0
 	screenWelcome = 1
 	screenAbout   = 2
 )
 
-// fakeState is what persists between invocations.
+// fakeState is what persists between invocations. Cursor is the insertion
+// position inside the focused field, in runes, so DEL after MOVE_END deletes
+// the typed text exactly like a real IME would.
 type fakeState struct {
 	Running  bool   `json:"running"`
 	App      string `json:"app"`
 	Screen   int    `json:"screen"`
 	Username string `json:"username"`
 	Focused  string `json:"focused"`
+	Cursor   int    `json:"cursor"`
 }
 
 // Fake is the simulated-app driver.
@@ -62,24 +67,37 @@ func OpenFake() *Fake {
 	return &f
 }
 
-// save persists the session; a stale/corrupt file is not fatal — the next
-// command simply reloads what it can.
-func (f *Fake) save() {
+// save persists the session. A write failure is surfaced, never swallowed:
+// the command that triggered it must fail (exit 1) so an agent learns the
+// state did not persist, instead of every later command failing with
+// "no fake app running".
+func (f *Fake) save() error {
 	data, err := json.Marshal(f.state)
 	if err != nil {
-		return
+		return fmt.Errorf("fake state encode: %w", err)
 	}
-	_ = os.WriteFile(fakeStatePath(), data, 0o600)
+	p := fakeStatePath()
+	if err := os.WriteFile(p, data, 0o600); err != nil {
+		return fmt.Errorf("fake state write failed (%s): %w", p, err)
+	}
+	return nil
 }
 
-// Launch starts the simulated app. Any name ending in .apk is accepted —
-// nothing is really installed.
+// Launch starts the simulated app. The path must exist and end in .apk —
+// the same accessibility rule the session runtimes enforce (AGD-07).
 func (f *Fake) Launch(apk string) error {
 	if !strings.EqualFold(filepath.Ext(apk), ".apk") {
 		return fmt.Errorf("launch: %q does not look like an APK (.apk)", apk)
 	}
+	if _, err := os.Stat(apk); err != nil {
+		return fmt.Errorf("launch: apk not accessible: %w", err)
+	}
+	prev := f.state
 	f.state = fakeState{Running: true, App: apk, Screen: screenMain, Focused: ""}
-	f.save()
+	if err := f.save(); err != nil {
+		f.state = prev // nothing persisted, nothing changed
+		return fmt.Errorf("launch: %w", err)
+	}
 	return nil
 }
 
@@ -89,8 +107,13 @@ func (f *Fake) Close() error {
 		return err
 	}
 	f.state.Running = false
-	f.save()
-	_ = os.Remove(fakeStatePath())
+	if err := f.save(); err != nil {
+		f.state.Running = true
+		return fmt.Errorf("close: %w", err)
+	}
+	if err := os.Remove(fakeStatePath()); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("close: %w", err)
+	}
 	return nil
 }
 
@@ -200,17 +223,23 @@ func (f *Fake) Tap(x, y int) error {
 		switch el.id {
 		case "demo:id/username":
 			f.state.Focused = "username"
+			f.state.Cursor = len([]rune(f.state.Username))
 		case "demo:id/signin":
 			f.state.Screen = screenWelcome
 			f.state.Focused = ""
+			f.state.Cursor = 0
 		case "demo:id/about":
 			f.state.Screen = screenAbout
 			f.state.Focused = ""
+			f.state.Cursor = 0
 		case "demo:id/back":
 			f.state.Screen = screenMain
 			f.state.Focused = ""
+			f.state.Cursor = 0
 		}
-		f.save()
+		if err := f.save(); err != nil {
+			return fmt.Errorf("tap: %w", err)
+		}
 		return nil
 	}
 	return nil // tap on empty screen area: a no-op, like a real tap
@@ -230,8 +259,16 @@ func (f *Fake) Type(text string) error {
 	if f.state.Focused != "username" {
 		return errors.New("type: no focused text field; tap the field first")
 	}
-	f.state.Username += text
-	f.save()
+	runes := []rune(f.state.Username)
+	at := f.state.Cursor
+	if at < 0 || at > len(runes) {
+		at = len(runes) // tolerate state files written by older versions
+	}
+	f.state.Username = string(runes[:at]) + text + string(runes[at:])
+	f.state.Cursor = at + len([]rune(text))
+	if err := f.save(); err != nil {
+		return fmt.Errorf("type: %w", err)
+	}
 	return nil
 }
 
@@ -248,22 +285,39 @@ func (f *Fake) Swipe(x1, y1, x2, y2, durationMs int) error {
 	return nil
 }
 
-// Key handles BACK, HOME and ENTER; other keycodes are accepted no-ops.
+// Key handles BACK, HOME, ENTER, MOVE_END and DEL like a real IME: DEL
+// deletes the rune before the cursor, MOVE_END parks the cursor after the
+// last rune — together they are what `clear` uses to empty a field. Unknown
+// keycodes are accepted no-ops, exactly like a real device.
 func (f *Fake) Key(code int) error {
 	if err := f.running(); err != nil {
 		return err
 	}
+	runes := []rune(f.state.Username)
 	switch code {
 	case keyBack, keyHome:
 		f.state.Screen = screenMain
 		f.state.Focused = ""
+		f.state.Cursor = 0
 	case keyEnter:
 		if f.state.Screen == screenMain && f.state.Focused == "username" {
 			f.state.Screen = screenWelcome
 			f.state.Focused = ""
+			f.state.Cursor = 0
+		}
+	case keyMoveEnd:
+		if f.state.Focused == "username" {
+			f.state.Cursor = len(runes)
+		}
+	case keyDel:
+		if f.state.Focused == "username" && f.state.Cursor > 0 && f.state.Cursor <= len(runes) {
+			f.state.Username = string(runes[:f.state.Cursor-1]) + string(runes[f.state.Cursor:])
+			f.state.Cursor--
 		}
 	}
-	f.save()
+	if err := f.save(); err != nil {
+		return fmt.Errorf("key %d: %w", code, err)
+	}
 	return nil
 }
 
