@@ -379,12 +379,25 @@ func fakeEnv(t *testing.T) {
 	t.Setenv("AGENTDROID_FAKE_STATE", filepath.Join(t.TempDir(), "state.json"))
 }
 
+// demoAPK writes a tiny placeholder APK. The fake runtime stats the path at
+// launch (the same accessibility rule the session runtimes enforce), so the
+// tests must hand it a file that really exists.
+func demoAPK(t *testing.T) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "demo.apk")
+	if err := os.WriteFile(p, []byte("PK\x03\x04 placeholder payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
 func TestFakeRuntimeAgentLoop(t *testing.T) {
 	fakeEnv(t)
 	fa := []string{"--runtime", "fake"}
 
 	// launch → snapshot shows the main screen
-	if code, out, errOut := runApp(t, append(fa, "launch", "demo.apk"), nil); code != 0 || !strings.Contains(out, "launched demo.apk") {
+	apk := demoAPK(t)
+	if code, out, errOut := runApp(t, append(fa, "launch", apk), nil); code != 0 || !strings.Contains(out, "launched") || !strings.Contains(out, "demo.apk") {
 		t.Fatalf("launch exit=%d out=%q stderr=%q", code, out, errOut)
 	}
 	code, out, errOut := runApp(t, append(fa, "snapshot"), nil)
@@ -458,7 +471,7 @@ func TestFakeRuntimeValidation(t *testing.T) {
 func TestFakeRuntimeTypeWithoutFocus(t *testing.T) {
 	fakeEnv(t)
 	fa := []string{"--runtime", "fake"}
-	runApp(t, append(fa, "launch", "demo.apk"), nil)
+	runApp(t, append(fa, "launch", demoAPK(t)), nil)
 	if code, _, errOut := runApp(t, append(fa, "type", "hi"), nil); code != 1 || !strings.Contains(errOut, "no focused text field") {
 		t.Fatalf("type without focus exit=%d stderr=%q", code, errOut)
 	}
@@ -467,7 +480,7 @@ func TestFakeRuntimeTypeWithoutFocus(t *testing.T) {
 func TestFakeRuntimeScreenshotPNG(t *testing.T) {
 	fakeEnv(t)
 	fa := []string{"--runtime", "fake"}
-	runApp(t, append(fa, "launch", "demo.apk"), nil)
+	runApp(t, append(fa, "launch", demoAPK(t)), nil)
 	code, raw, _ := runApp(t, append(fa, "screenshot"), nil)
 	if code != 0 || len(raw) < 8 || raw[0] != 0x89 || raw[1] != 'P' || raw[2] != 'N' || raw[3] != 'G' {
 		t.Fatalf("fake screenshot must be PNG on stdout, exit=%d len=%d", code, len(raw))
@@ -487,7 +500,7 @@ func TestFakeRuntimeDumpIsParseable(t *testing.T) {
 	// parser consumes — that is the whole point of the common protocol.
 	fakeEnv(t)
 	f := driver.OpenFake()
-	if err := f.Launch("demo.apk"); err != nil {
+	if err := f.Launch(demoAPK(t)); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := f.Dump()
