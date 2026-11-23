@@ -16,6 +16,14 @@ socket** at:
 Abstract sockets live only in the kernel — no file on disk, no `/tmp` litter,
 nothing to clean up. This is what makes sessions zero-storage.
 
+**Trust boundary.** The protocol carries no credentials: whoever can dial the
+socket can drive the session. The daemon closes this gap with the kernel —
+on Linux every accepted connection is checked with `SO_PEERCRED`, and
+connections from processes of a different OS user are dropped before the
+first request. Within one OS user the socket stays open by design (that is
+what makes the CLI usable from any agent process of that user); on a shared
+account, treat same-user processes as trusted.
+
 `launch` spawns the adapter detached (setsid), waits for the socket to accept,
 then performs the `launch` handshake. Every subsequent CLI invocation dials the
 socket, sends one request, prints the response, and exits. The adapter keeps

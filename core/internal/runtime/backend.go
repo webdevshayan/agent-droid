@@ -131,12 +131,19 @@ func dispatch(req *protocol.Request, b Backend) (resp *protocol.Response) {
 
 // Serve accepts connections on ln and serves each concurrently. It returns
 // once ln is closed. onClosed runs when a client completed a close command,
-// so hosts can shut the session down.
+// so hosts can shut the session down. Connections from processes of a
+// different OS user are closed before the first request: the protocol has
+// no credential exchange, so the kernel (SO_PEERCRED, Linux) does the
+// authentication instead — a session belongs to the user who launched it.
 func Serve(ln net.Listener, b Backend, onClosed func()) error {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
 			return err
+		}
+		if !sameUser(conn) {
+			conn.Close()
+			continue
 		}
 		go func() {
 			defer conn.Close()
