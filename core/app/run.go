@@ -74,7 +74,7 @@ func Run(argv []string, stdout, stderr io.Writer, drv driver.Driver) int {
 		}
 	}
 
-	if err := dispatch(drv, cmd, stdout); err != nil {
+	if err := dispatch(drv, cmd, stdout, stderr); err != nil {
 		fmt.Fprintf(stderr, "agentdroid: %v\n", err)
 		return 1
 	}
@@ -93,7 +93,7 @@ func openDriver(cmd cli.Command) (driver.Driver, error) {
 	return driver.NewADB(c), nil
 }
 
-func dispatch(d driver.Driver, cmd cli.Command, stdout io.Writer) error {
+func dispatch(d driver.Driver, cmd cli.Command, stdout, stderr io.Writer) error {
 	switch cmd.Verb {
 	case cli.VerbDevices:
 		listing, err := d.Devices()
@@ -192,6 +192,11 @@ func dispatch(d driver.Driver, cmd cli.Command, stdout io.Writer) error {
 			return err
 		}
 		fmt.Fprintf(stdout, "swiped %s (%d,%d) -> %s (%d,%d)\n", cmd.Ref, x1, y1, cmd.Ref2, x2, y2)
+		if _, isFake := d.(*driver.Fake); isFake {
+			// Honesty over silent success: the simulated screens do not
+			// scroll, so say so instead of implying the swipe landed.
+			fmt.Fprintln(stderr, "agentdroid:: note: swipe is ignored by the fake runtime (simulated screens do not scroll)")
+		}
 
 	case cli.VerbScreenshot:
 		data, err := d.Screenshot()
@@ -253,7 +258,7 @@ func runSession(cmd cli.Command, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "agentdroid: %v\n", err)
 		return 1
 	}
-	if err := dispatch(driver.NewRT(client), cmd, stdout); err != nil {
+	if err := dispatch(driver.NewRT(client), cmd, stdout, stderr); err != nil {
 		fmt.Fprintf(stderr, "agentdroid: %v\n", err)
 		return 1
 	}
