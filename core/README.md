@@ -192,8 +192,10 @@ output — is treated as untrusted:
 - **No shell interpolation anywhere**: arguments go straight to `exec`, text
   payloads are allowlisted, and there is no path from user text to
   device-shell execution.
-- **Fake runtime state** is a JSON file under the OS temp dir (override with
-  `AGENTDROID_FAKE_STATE`), written with `0600` permissions.
+- **Fake runtime state** is a JSON file under the user's cache directory
+  (`AGENTDROID_FAKE_STATE` overrides), written with `0600` permissions,
+  guarded by an advisory flock so concurrent invocations serialize instead
+  of last-write-winning.
 
 ## Development
 
