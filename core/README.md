@@ -122,7 +122,7 @@ later command attaches to that socket and drives the session through the same
 `driver.Driver` contract as adb (`driver.RT`):
 
 ```console
-$ agentdroid launch app.apk --runtime fake --session s1
+$ agentdroid launch app.apk --runtime fake-login --session s1
 launched app.apk — session "s1" (adapter pid 1234)
 $ agentdroid snapshot --session s1        # same @eN refs as everywhere else
 $ agentdroid tap @e3 --session s1 && agentdroid type "hi@example.com" --session s1
@@ -130,14 +130,22 @@ $ agentdroid screenshot --session s1 > screen.png
 $ agentdroid close --session s1
 ```
 
-- `--runtime` selects the session runtime: `fake` (simulated login app),
-  `atl` (Android Translation Layer) or `winedroid` — both spawn their real
-  launcher as a plain Linux process, no emulator, no adb, no container.
+- `--runtime` selects the session runtime: `fake-login` (simulated email/
+  password login app), `atl` (Android Translation Layer) or `winedroid` —
+  both spawn their real launcher as a plain Linux process, no emulator, no
+  adb, no container.
 - Refs are resolved against the **live screen** at command time, so they
   never go stale between invocations and no element map is ever stored.
 - `agentdroid serve --backend <rt> --session <name> [--stdio]` serves a
   session directly (this is what `launch --session` spawns; `--stdio` speaks
   the same protocol on stdin/stdout for embedding).
+- **Two simulated apps, two names.** The in-process `--runtime fake` demo
+  app (three screens, JSON state, `demo:id/username` refs) and the session
+  `--runtime fake-login` login app (zero-storage, email/password,
+  `demo:id/email` refs) are different programs on purpose — sharing one
+  name for two different view trees made every documented ref work only by
+  coincidence. Use `fake` for the no-device agent loop, `fake-login` when
+  the app must survive across CLI invocations as a daemon.
 - Adapter status matrix and the upstream hooks ATL/WineDroid still need:
   [docs/ADAPTERS.md](docs/ADAPTERS.md); the session wire protocol:
   [docs/SESSION_PROTOCOL.md](docs/SESSION_PROTOCOL.md).

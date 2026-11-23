@@ -220,7 +220,7 @@ func TestNewBackendUnknown(t *testing.T) {
 	if _, err := NewBackend("emulator", "", ""); err == nil || !strings.Contains(err.Error(), "unknown backend") {
 		t.Fatalf("unknown backend: %v", err)
 	}
-	for _, name := range []string{RuntimeFake, RuntimeATL, RuntimeWineDroid} {
+	for _, name := range []string{RuntimeFakeLogin, RuntimeATL, RuntimeWineDroid} {
 		b, err := NewBackend(name, "", "")
 		if err != nil || b == nil {
 			t.Fatalf("backend %s: %v", name, err)

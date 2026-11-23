@@ -74,7 +74,7 @@ func TestSessionLaunchSnapshotTapTypeScreenshotClose(t *testing.T) {
 
 	// launch: spawns the detached daemon, waits for the abstract socket,
 	// performs the launch handshake.
-	stdout, stderr, code := runAppCLI(t, "launch", apk, "--runtime", "fake", "--session", session)
+	stdout, stderr, code := runAppCLI(t, "launch", apk, "--runtime", "fake-login", "--session", session)
 	if code != 0 {
 		t.Fatalf("launch exit %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
 	}
@@ -83,7 +83,7 @@ func TestSessionLaunchSnapshotTapTypeScreenshotClose(t *testing.T) {
 	}
 
 	// A second launch on the live session must be refused.
-	_, stderr, code = runAppCLI(t, "launch", apk, "--runtime", "fake", "--session", session)
+	_, stderr, code = runAppCLI(t, "launch", apk, "--runtime", "fake-login", "--session", session)
 	if code != 1 || !strings.Contains(stderr, "already live") {
 		t.Fatalf("duplicate launch: code=%d stderr=%q", code, stderr)
 	}
@@ -171,7 +171,7 @@ func TestSessionLaunchSnapshotTapTypeScreenshotClose(t *testing.T) {
 func TestSessionUnknownRefFailsWithListing(t *testing.T) {
 	session := newSessionName(t)
 	apk := makeSessionApk(t)
-	if _, _, code := runAppCLI(t, "launch", apk, "--runtime", "fake", "--session", session); code != 0 {
+	if _, _, code := runAppCLI(t, "launch", apk, "--runtime", "fake-login", "--session", session); code != 0 {
 		t.Fatal("launch failed")
 	}
 	defer func() { runAppCLI(t, "close", "--session", session) }()
@@ -189,7 +189,7 @@ func TestServeStdioMode(t *testing.T) {
 			`{"id":2,"cmd":"snapshot"}` + "\n" +
 			`{"id":3,"cmd":"close"}` + "\n")
 	var out bytes.Buffer
-	cmd := exec.Command(testBinary(t), "serve", "--backend", "fake", "--stdio")
+	cmd := exec.Command(testBinary(t), "serve", "--backend", "fake-login", "--stdio")
 	cmd.Env = append(os.Environ(), "AGENTDROID_TEST_APP=1")
 	cmd.Stdin = in
 	cmd.Stdout = &out

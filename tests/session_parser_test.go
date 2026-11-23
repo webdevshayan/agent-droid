@@ -19,15 +19,15 @@ func TestParseSessionModeHappyPaths(t *testing.T) {
 		argv []string
 		want func(c cli.Command) error
 	}{
-		{"session name at the length limit parses", []string{"launch", "demo.apk", "--runtime", "fake", "--session", strings.Repeat("x", 90)}, func(c cli.Command) error {
+		{"session name at the length limit parses", []string{"launch", "demo.apk", "--runtime", "fake-login", "--session", strings.Repeat("x", 90)}, func(c cli.Command) error {
 			if c.Session != strings.Repeat("x", 90) {
 				return fmt.Errorf("session name mangled: %q", c.Session)
 			}
 			return nil
 		},
 		},
-		{"launch fake session", []string{"launch", "demo.apk", "--runtime", "fake", "--session", "s1"}, func(c cli.Command) error {
-			if c.Verb != cli.VerbLaunch || c.Session != "s1" || c.Runtime != cli.RuntimeFake || c.Path != "demo.apk" {
+		{"launch fake-login session", []string{"launch", "demo.apk", "--runtime", "fake-login", "--session", "s1"}, func(c cli.Command) error {
+			if c.Verb != cli.VerbLaunch || c.Session != "s1" || c.Runtime != cli.RuntimeFakeLogin || c.Path != "demo.apk" {
 				return fmt.Errorf("launch parse: %+v", c)
 			}
 			return nil
@@ -80,8 +80,8 @@ func TestParseSessionModeHappyPaths(t *testing.T) {
 			}
 			return nil
 		}},
-		{"serve stdio", []string{"serve", "--backend", "fake", "--stdio"}, func(c cli.Command) error {
-			if c.Verb != cli.VerbServe || !c.Stdio || c.Backend != "fake" {
+		{"serve stdio", []string{"serve", "--backend", "fake-login", "--stdio"}, func(c cli.Command) error {
+			if c.Verb != cli.VerbServe || !c.Stdio || c.Backend != "fake-login" {
 				return fmt.Errorf("serve stdio parse: %+v", c)
 			}
 			return nil
@@ -104,8 +104,8 @@ func TestParseSessionModeErrors(t *testing.T) {
 		argv []string
 		want string
 	}{
-		{"launch session without runtime", []string{"launch", "demo.apk", "--session", "s1"}, "requires --runtime fake, atl or winedroid"},
-		{"launch session with adb", []string{"launch", "demo.apk", "--runtime", "adb", "--session", "s1"}, "requires --runtime fake, atl or winedroid"},
+		{"launch session without runtime", []string{"launch", "demo.apk", "--session", "s1"}, "requires --runtime fake-login, atl or winedroid"},
+		{"launch session with adb", []string{"launch", "demo.apk", "--runtime", "adb", "--session", "s1"}, "requires --runtime fake-login, atl or winedroid"},
 		{"atl without session", []string{"launch", "demo.apk", "--runtime", "atl"}, "persistent sessions"},
 		{"winedroid without session", []string{"install", "demo.apk", "--runtime", "winedroid"}, "persistent sessions"},
 		{"attach with adb runtime", []string{"snapshot", "--runtime", "adb", "--session", "s1"}, "drop --runtime"},
@@ -115,15 +115,18 @@ func TestParseSessionModeErrors(t *testing.T) {
 		{"back in session", []string{"back", "--session", "s1"}, "not supported in session mode"},
 		{"home in session", []string{"home", "--session", "s1"}, "not supported in session mode"},
 		{"session with help", []string{"help", "--session", "s1"}, "does not apply to help"},
-		{"session name with slash", []string{"launch", "demo.apk", "--runtime", "fake", "--session", "a/b"}, "must match"},
-		{"session name with space", []string{"launch", "demo.apk", "--runtime", "fake", "--session", "bad name"}, "must match"},
-		{"session name too long", []string{"launch", "demo.apk", "--runtime", "fake", "--session", strings.Repeat("x", 91)}, "over the 90-character limit"},
+		{"session name with slash", []string{"launch", "demo.apk", "--runtime", "fake-login", "--session", "a/b"}, "must match"},
+		{"session name with space", []string{"launch", "demo.apk", "--runtime", "fake-login", "--session", "bad name"}, "must match"},
+		{"session name too long", []string{"launch", "demo.apk", "--runtime", "fake-login", "--session", strings.Repeat("x", 91)}, "over the 90-character limit"},
 		{"serial with session", []string{"tap", "@e1", "--serial", "X", "--session", "s1"}, "adb runtime only"},
 		{"serve without backend", []string{"serve", "--session", "s1"}, "--backend is required"},
 		{"serve unknown backend", []string{"serve", "--backend", "qemu", "--session", "s1"}, "unknown backend"},
 		{"serve adb backend", []string{"serve", "--backend", "adb", "--session", "s1"}, "unknown backend"},
-		{"serve without session or stdio", []string{"serve", "--backend", "fake"}, "--session is required"},
-		{"serve with runtime flag", []string{"serve", "--backend", "fake", "--runtime", "fake", "--session", "s1"}, "--backend, not --runtime"},
+		{"serve without session or stdio", []string{"serve", "--backend", "fake-login"}, "--session is required"},
+		{"serve with runtime flag", []string{"serve", "--backend", "fake-login", "--runtime", "fake", "--session", "s1"}, "--backend, not --runtime"},
+		{"in-process fake with session", []string{"snapshot", "--runtime", "fake", "--session", "s1"}, "drop --runtime or pick fake-login"},
+		{"in-process fake launch with session", []string{"launch", "demo.apk", "--runtime", "fake", "--session", "s1"}, "in-process demo app"},
+		{"fake-login without session", []string{"launch", "demo.apk", "--runtime", "fake-login"}, "persistent sessions"},
 		{"backend outside serve", []string{"snapshot", "--backend", "fake"}, "--backend only applies to serve"},
 		{"stdio outside serve", []string{"snapshot", "--stdio"}, "--stdio only applies to serve"},
 		{"runtime-bin outside serve/launch", []string{"snapshot", "--runtime-bin", "/x"}, "--runtime-bin only applies"},

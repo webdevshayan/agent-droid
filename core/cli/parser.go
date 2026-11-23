@@ -35,13 +35,18 @@ const (
 	VerbServe      Verb = "serve"
 )
 
-// Runtime selectors for the --runtime flag. adb and fake run in-process;
-// atl and winedroid are persistent session runtimes (spawned as daemons,
-// attached with --session). `serve --backend` uses the same names — keep
-// in sync with internal/runtime.
+// Runtime selectors for the --runtime flag. adb and fake run in-process —
+// fake is the three-screen demo app with JSON state. fake-login, atl and
+// winedroid are persistent session runtimes (spawned as daemons, attached
+// with --session); fake-login is the zero-storage simulated email/password
+// login app the daemon serves — a DIFFERENT simulated app from the in-
+// process fake, with a different view tree and ref map, hence the distinct
+// name. `serve --backend` uses the same names — keep in sync with
+// internal/runtime.
 const (
 	RuntimeFake      = "fake"
 	RuntimeAdb       = "adb"
+	RuntimeFakeLogin = "fake-login"
 	RuntimeATL       = "atl"
 	RuntimeWineDroid = "winedroid"
 )
@@ -64,7 +69,7 @@ const MaxSessionLen = 90
 // Command is the fully validated result of parsing one invocation.
 type Command struct {
 	Verb    Verb
-	Runtime string // "adb" (default) or "fake"
+	Runtime string // "adb" (default), "fake" (in-process) or a session runtime
 	Serial  string // adb -s selector; "" = first attached device
 
 	Ref    string // tap/clear target, swipe source
@@ -155,10 +160,10 @@ func Parse(argv []string) (Command, error) {
 			}
 			i++
 			switch argv[i] {
-			case RuntimeAdb, RuntimeFake, RuntimeATL, RuntimeWineDroid:
+			case RuntimeAdb, RuntimeFake, RuntimeFakeLogin, RuntimeATL, RuntimeWineDroid:
 				c.Runtime, runtimeSet = argv[i], true
 			default:
-				return c, fmt.Errorf("unknown runtime %q; want adb, fake, atl or winedroid", argv[i])
+				return c, fmt.Errorf("unknown runtime %q; want adb, fake, fake-login, atl or winedroid", argv[i])
 			}
 		case arg == "--session":
 			if sessionSet {
@@ -355,12 +360,12 @@ func Parse(argv []string) (Command, error) {
 			return c, errors.New("serve takes no arguments")
 		}
 		switch c.Backend {
-		case RuntimeFake, RuntimeATL, RuntimeWineDroid:
+		case RuntimeFakeLogin, RuntimeATL, RuntimeWineDroid:
 		default:
 			if c.Backend == "" {
-				return c, errors.New("serve: --backend is required (fake, atl or winedroid)")
+				return c, errors.New("serve: --backend is required (fake-login, atl or winedroid)")
 			}
-			return c, fmt.Errorf("serve: unknown backend %q; want fake, atl or winedroid", c.Backend)
+			return c, fmt.Errorf("serve: unknown backend %q; want fake-login, atl or winedroid", c.Backend)
 		}
 		if !c.Stdio && !sessionSet {
 			return c, errors.New("serve: --session is required for socket mode (or use --stdio)")
@@ -403,21 +408,24 @@ func Parse(argv []string) (Command, error) {
 			return c, errors.New("flag --session does not apply to help or version")
 		case VerbLaunch, VerbInstall:
 			switch c.Runtime {
-			case RuntimeFake, RuntimeATL, RuntimeWineDroid:
+			case RuntimeFakeLogin, RuntimeATL, RuntimeWineDroid:
 			default:
-				return c, errors.New("launch --session requires --runtime fake, atl or winedroid")
+				if c.Runtime == RuntimeFake {
+					return c, errors.New("--runtime fake is the in-process demo app; launch --session needs --runtime fake-login, atl or winedroid")
+				}
+				return c, errors.New("launch --session requires --runtime fake-login, atl or winedroid")
 			}
 		case VerbSnapshot, VerbTap, VerbType, VerbScreenshot, VerbClose:
-			if c.Runtime == RuntimeAdb {
-				return c, errors.New("--session talks to a runtime daemon; drop --runtime or pick fake, atl or winedroid")
+			if c.Runtime == RuntimeAdb || c.Runtime == RuntimeFake {
+				return c, errors.New("--session talks to a runtime daemon; drop --runtime or pick fake-login, atl or winedroid")
 			}
 		}
 	} else if c.Verb == VerbLaunch || c.Verb == VerbInstall {
-		if c.Runtime == RuntimeATL || c.Runtime == RuntimeWineDroid {
+		if c.Runtime == RuntimeATL || c.Runtime == RuntimeWineDroid || c.Runtime == RuntimeFakeLogin {
 			return c, fmt.Errorf("%s runtimes are persistent sessions; add --session <name>", c.Runtime)
 		}
 	}
-	if serialSet && (sessionSet || c.Verb == VerbServe || c.Verb == VerbHelp || c.Verb == VerbVersion || c.Runtime == RuntimeFake || c.Runtime == RuntimeATL || c.Runtime == RuntimeWineDroid) {
+	if serialSet && (sessionSet || c.Verb == VerbServe || c.Verb == VerbHelp || c.Verb == VerbVersion || c.Runtime == RuntimeFake || c.Runtime == RuntimeFakeLogin || c.Runtime == RuntimeATL || c.Runtime == RuntimeWineDroid) {
 		return c, errors.New("flag --serial applies to the adb runtime only")
 	}
 	return c, nil

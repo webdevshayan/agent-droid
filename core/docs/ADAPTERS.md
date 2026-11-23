@@ -24,7 +24,7 @@ same protocol on stdin/stdout for embedding or testing.
 
 | Backend    | Process lifecycle (spawn / keep alive / clean shutdown) | View tree (`snapshot`, tap/type targeting) | Framebuffer (`screenshot`) |
 | ---------- | ------------------------------------------------------- | ------------------------------------------ | -------------------------- |
-| `fake`     | ✅ simulated, self-contained                             | ✅ full login app state machine             | ✅ real PNG (540×960)      |
+| `fake-login` | ✅ simulated, self-contained                             | ✅ full login app state machine             | ✅ real PNG (540×960)      |
 | `atl`      | ✅ real: spawns the ATL launcher, kills the process group on close | ⚠️ needs upstream accessor | ⚠️ needs upstream accessor |
 | `winedroid`| ✅ real: spawns the WineDroid launcher, kills the process group on close | ⚠️ needs upstream accessor | ⚠️ needs upstream accessor |
 
@@ -50,7 +50,7 @@ are:
    bytes (or raw RGBA + geometry the adapter can convert). A window-surface
    read in the same hook is fine.
 
-Both changes are additive, self-contained, and testable with the `fake`
+Both changes are additive, self-contained, and testable with the `fake-login`
 backend as the reference implementation. Once a runtime exposes either hook,
 wire it into `processBackend` (`internal/runtime/process.go`) — the session
 protocol, refs, rendering and tests stay untouched.
@@ -84,6 +84,6 @@ parser rejects them at exit code 2.
    serve --stdio` as a bridge).
 2. Register it in `NewBackend` (`internal/runtime/backend.go`) or run it with
    `--runtime-bin`.
-3. Add a session test against the `fake` flow in `tests/` —
+3. Add a session test against the `fake-login` flow in `tests/` —
    launch → snapshot → tap/type → screenshot → close is the full contract
    (see `tests/integration_test.go` and `core/driver/rt_test.go`).
