@@ -55,6 +55,12 @@ const MaxTextLen = 4096
 // anywhere near this, so larger values mean a malformed command.
 const MaxCoord = 100000
 
+// MaxSessionLen bounds session names: the abstract socket name is
+// "@agentdroid-<name>" and must fit the kernel's 108-byte sun_path limit;
+// 90 leaves headroom. Validated at parse time (exit 2) so a bad name never
+// fails deep inside the daemon's socket bind (exit 1).
+const MaxSessionLen = 90
+
 // Command is the fully validated result of parsing one invocation.
 type Command struct {
 	Verb    Verb
@@ -74,6 +80,25 @@ type Command struct {
 	Backend    string // serve --backend: fake, atl or winedroid
 	Stdio      bool   // serve --stdio: session protocol on stdin/stdout
 	RuntimeBin string // --runtime-bin: override the adapter binary
+}
+
+// validSessionName enforces a safe charset and length on session names at
+// parse time: abstract sockets accept any bytes except NUL, but a name with
+// odd bytes (or one that overflows sun_path) would only fail later, deep in
+// the daemon's bind, with an unusable exit-1 diagnostic.
+func validSessionName(name string) error {
+	if len(name) > MaxSessionLen {
+		return fmt.Errorf("flag --session: name is %d characters, over the %d-character limit", len(name), MaxSessionLen)
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+			r == '.', r == '_', r == '-':
+		default:
+			return fmt.Errorf("flag --session: name %q must match [A-Za-z0-9._-] and be at most %d characters", name, MaxSessionLen)
+		}
+	}
+	return nil
 }
 
 // isNegativeNumber reports whether arg is a bare negative integer ("-10").
@@ -145,6 +170,9 @@ func Parse(argv []string) (Command, error) {
 			i++
 			if argv[i] == "" {
 				return c, errors.New("flag --session requires a non-empty value")
+			}
+			if err := validSessionName(argv[i]); err != nil {
+				return c, err
 			}
 			c.Session, sessionSet = argv[i], true
 		case arg == "--backend":
@@ -343,7 +371,7 @@ func Parse(argv []string) (Command, error) {
 		c.Verb = Verb(pos[0])
 
 	default:
-		return c, fmt.Errorf("unknown command %q; valid commands: devices launch close install snapshot tap type swipe screenshot clear back home serve", pos[0])
+		return c, fmt.Errorf("unknown command %q; valid commands: devices launch install close snapshot tap type swipe screenshot clear back home serve help version", pos[0])
 	}
 
 	// Flags only apply to the verbs/runtimes that understand them — a

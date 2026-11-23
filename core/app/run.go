@@ -230,6 +230,12 @@ func dispatch(d driver.Driver, cmd cli.Command, stdout, stderr io.Writer) error 
 			return err
 		}
 		fmt.Fprintln(stdout, "home")
+
+	default:
+		// Defensive contract guard: a verb the parser accepts but dispatch
+		// does not know must be a loud error (exit 1), never a silent
+		// exit-0 no-op for agents.
+		return fmt.Errorf("unimplemented command %q — parser and dispatch are out of sync", cmd.Verb)
 	}
 	return nil
 }

@@ -19,6 +19,13 @@ func TestParseSessionModeHappyPaths(t *testing.T) {
 		argv []string
 		want func(c cli.Command) error
 	}{
+		{"session name at the length limit parses", []string{"launch", "demo.apk", "--runtime", "fake", "--session", strings.Repeat("x", 90)}, func(c cli.Command) error {
+			if c.Session != strings.Repeat("x", 90) {
+				return fmt.Errorf("session name mangled: %q", c.Session)
+			}
+			return nil
+		},
+		},
 		{"launch fake session", []string{"launch", "demo.apk", "--runtime", "fake", "--session", "s1"}, func(c cli.Command) error {
 			if c.Verb != cli.VerbLaunch || c.Session != "s1" || c.Runtime != cli.RuntimeFake || c.Path != "demo.apk" {
 				return fmt.Errorf("launch parse: %+v", c)
@@ -108,6 +115,9 @@ func TestParseSessionModeErrors(t *testing.T) {
 		{"back in session", []string{"back", "--session", "s1"}, "not supported in session mode"},
 		{"home in session", []string{"home", "--session", "s1"}, "not supported in session mode"},
 		{"session with help", []string{"help", "--session", "s1"}, "does not apply to help"},
+		{"session name with slash", []string{"launch", "demo.apk", "--runtime", "fake", "--session", "a/b"}, "must match"},
+		{"session name with space", []string{"launch", "demo.apk", "--runtime", "fake", "--session", "bad name"}, "must match"},
+		{"session name too long", []string{"launch", "demo.apk", "--runtime", "fake", "--session", strings.Repeat("x", 91)}, "over the 90-character limit"},
 		{"serial with session", []string{"tap", "@e1", "--serial", "X", "--session", "s1"}, "adb runtime only"},
 		{"serve without backend", []string{"serve", "--session", "s1"}, "--backend is required"},
 		{"serve unknown backend", []string{"serve", "--backend", "qemu", "--session", "s1"}, "unknown backend"},
