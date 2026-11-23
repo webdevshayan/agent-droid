@@ -39,7 +39,7 @@ func TestSessionLaunchAdapterDies(t *testing.T) {
 	cmd := cli.Command{
 		Verb:       cli.VerbLaunch,
 		Path:       apk,
-		Runtime:    cli.RuntimeFake,
+		Runtime:    cli.RuntimeFakeLogin,
 		Session:    "dies-" + time.Now().Format("150405.000000000"),
 		RuntimeBin: "/bin/false", // the adapter exits before serving
 	}

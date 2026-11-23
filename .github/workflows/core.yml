@@ -62,7 +62,7 @@ jobs:
         run: |
           set -e
           APK=/tmp/demo.apk
-          /tmp/agentdroid launch "$APK" --runtime fake --session ci1
+          /tmp/agentdroid launch "$APK" --runtime fake-login --session ci1
           /tmp/agentdroid snapshot --session ci1 | grep 'demo:id/email'
           /tmp/agentdroid tap @e3 --session ci1
           /tmp/agentdroid type 'ci@example.com' --session ci1
@@ -78,6 +78,6 @@ jobs:
         run: |
           set -e
           printf '{"id":1,"cmd":"launch","apk":"/tmp/demo.apk"}\n{"id":2,"cmd":"snapshot"}\n{"id":3,"cmd":"close"}\n' \
-            | /tmp/agentdroid serve --backend fake --stdio > /tmp/stdio.ndjson
+            | /tmp/agentdroid serve --backend fake-login --stdio > /tmp/stdio.ndjson
           grep -q '"id":2' /tmp/stdio.ndjson
           grep -q 'sign_in' /tmp/stdio.ndjson

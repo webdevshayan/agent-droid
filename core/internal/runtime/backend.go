@@ -17,11 +17,15 @@ import (
 	"github.com/webdevshayan/agent-droid/core/internal/protocol"
 )
 
-// Runtime choices and session naming.
+// Runtime choices and session naming. fake-login is the session daemon's
+// simulated app — the zero-storage email/password login app. It is a
+// different simulated app from the in-process `--runtime fake` demo app
+// (core/driver/fake.go), which is why the names differ.
 const (
 	RuntimeATL       = "atl"
 	RuntimeWineDroid = "winedroid"
-	RuntimeFake      = "fake"
+	RuntimeFake      = "fake"       // in-process demo driver (not served)
+	RuntimeFakeLogin = "fake-login" // session backend: simulated login app
 	DefaultSession   = "default"
 )
 
@@ -51,17 +55,17 @@ type Backend interface {
 	Stop()
 }
 
-// NewBackend builds the backend named by name (fake, atl or winedroid).
+// NewBackend builds the backend named by name (fake-login, atl or winedroid).
 func NewBackend(name, apk, runtimeBin string) (Backend, error) {
 	switch name {
-	case RuntimeFake:
+	case RuntimeFakeLogin:
 		return NewFakeBackend(apk), nil
 	case RuntimeATL:
 		return NewATLBackend(apk, runtimeBin), nil
 	case RuntimeWineDroid:
 		return NewWineDroidBackend(apk, runtimeBin), nil
 	default:
-		return nil, fmt.Errorf("unknown backend %q (want %s, %s or %s)", name, RuntimeFake, RuntimeATL, RuntimeWineDroid)
+		return nil, fmt.Errorf("unknown backend %q (want %s, %s or %s)", name, RuntimeFakeLogin, RuntimeATL, RuntimeWineDroid)
 	}
 }
 
